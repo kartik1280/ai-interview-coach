@@ -142,7 +142,10 @@ export default function Dashboard() {
               <LayoutDashboard className="w-4 h-4" />
               <span>Dashboard</span>
             </button>
-            <button className="flex items-center gap-1.5 text-stone-500 hover:text-black transition-colors">
+            <button
+              onClick={() => navigate('/settings', { state: userProfile })}
+              className="flex items-center gap-1.5 text-stone-500 hover:text-black transition-colors cursor-pointer"
+            >
               <Sliders className="w-4 h-4" />
               <span>Settings</span>
             </button>
@@ -233,8 +236,14 @@ export default function Dashboard() {
             </button>
 
             <button
-              onClick={() => alert("Full report generated based on your last 3 rounds!")}
-              className="bg-white border-2 border-black hover:bg-stone-50 active:scale-95 text-black font-radio font-bold text-sm py-3 px-6 rounded-xl shadow-xs transition-all cursor-pointer"
+              disabled={totalRoundsCount === 0}
+              onClick={() => navigate('/full-report', { state: { rounds, history, userProfile } })}
+              title={totalRoundsCount === 0 ? 'Complete at least 1 practice round to view full report' : ''}
+              className={`font-radio font-bold text-sm py-3 px-6 rounded-xl border-2 transition-all ${
+                totalRoundsCount === 0
+                  ? 'bg-stone-100 border-stone-300 text-stone-400 cursor-not-allowed opacity-60'
+                  : 'bg-white border-black text-black hover:bg-stone-50 active:scale-95 cursor-pointer shadow-xs'
+              }`}
             >
               View full report
             </button>
