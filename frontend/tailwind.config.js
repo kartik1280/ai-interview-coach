@@ -15,8 +15,8 @@ export default {
           purple: '#7F78C5',       // floppy disk purple accent
           darkpurple: '#5C4EB2',
           yellow: '#EEBF12',       // floppy shutter yellow accent
-          screenBg: '#194D15',     // vintage phosphor screen dark green
-          screenText: '#72D184',   // phosphor green glow text
+          screenBg: '#111111',     // 90s TV black screen
+          screenText: '#E5E5E5',   // 90s B&W TV silver white text
           black: '#191919',
         },
         cream: {
@@ -29,8 +29,8 @@ export default {
           crimson: '#F42615',
           red: '#F42615',
           black: '#191919',
-          screen: '#194D15',
-          screenText: '#72D184',
+          screen: '#111111',
+          screenText: '#E5E5E5',
           floppyPurple: '#7F78C5',
         }
       },
@@ -43,7 +43,7 @@ export default {
       boxShadow: {
         'parker': '0 10px 30px -10px rgba(25, 25, 25, 0.15)',
         'floppy': '0 25px 50px -12px rgba(127, 120, 197, 0.4)',
-        'crt-screen': 'inset 0 0 50px rgba(0,0,0,0.8), 0 0 25px rgba(114, 209, 132, 0.25)',
+        'crt-screen': 'inset 0 0 50px rgba(0,0,0,0.9), 0 0 25px rgba(255, 255, 255, 0.15)',
       }
     },
   },

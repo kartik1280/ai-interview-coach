@@ -48,17 +48,17 @@ export default function CRTMonitor({
             </span>
             <div className={`w-3 h-3 rounded-full border transition-all duration-300 ${
               isPoweredOn
-                ? 'bg-emerald-500 border-emerald-400 shadow-[0_0_10px_#10B981] animate-pulse'
+                ? 'bg-white border-stone-300 shadow-[0_0_10px_#FFFFFF] animate-pulse'
                 : 'bg-stone-700 border-stone-800 shadow-none'
             }`} />
           </button>
         </div>
 
-        {/* CRT Screen Frame & Display Area */}
+        {/* CRT Screen Frame & Display Area - 90s B&W TV Screen */}
         <div className={`relative my-3 w-full flex-1 rounded-2xl p-4 sm:p-6 border-[6px] border-[#C8BEAA] transition-all duration-500 overflow-hidden flex flex-col justify-center items-center ${
           isPoweredOn
-            ? 'bg-[#141E15] shadow-[inset_0_0_40px_rgba(0,0,0,0.95),_inset_0_0_20px_rgba(114,209,132,0.25)] crt-overlay crt-vignette'
-            : 'bg-[#050805] shadow-[inset_0_0_50px_rgba(0,0,0,0.98)]'
+            ? 'bg-[#111111] shadow-[inset_0_0_50px_rgba(0,0,0,0.95),_inset_0_0_20px_rgba(255,255,255,0.15)] crt-overlay crt-vignette'
+            : 'bg-[#050505] shadow-[inset_0_0_50px_rgba(0,0,0,0.98)]'
         }`}>
           
           {/* Inner Phosphor Screen Container */}
