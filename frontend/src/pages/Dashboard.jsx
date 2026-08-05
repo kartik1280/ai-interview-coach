@@ -85,45 +85,14 @@ export default function Dashboard() {
   }
 
   const handleRunSimulatedRound = () => {
-    setIsSimulating(true)
-    setSimStep('Running your round...')
-
-    setTimeout(() => {
-      setSimStep('Scoring your answers...')
-    }, 1200)
-
-    setTimeout(() => {
-      // Generate new score between 7.5 and 9.5
-      const newScore = parseFloat((Math.random() * 2 + 7.5).toFixed(1))
-      
-      const targetRoundName =
-        selectedRoundType === 'technical'
-          ? 'Technical round'
-          : selectedRoundType === 'behavioral'
-          ? 'Behavioral round'
-          : 'Aptitude round'
-
-      // Update round score
-      setRounds((prev) =>
-        prev.map((r) =>
-          r.id === selectedRoundType ? { ...r, score: newScore } : r
-        )
-      )
-
-      // Prepend to history
-      setHistory((prev) => [
-        {
-          id: Date.now(),
-          name: targetRoundName,
-          daysAgo: 'Just now',
-          score: newScore
-        },
-        ...prev
-      ])
-
-      setIsSimulating(false)
-      setIsModalOpen(false)
-    }, 2400)
+    setIsModalOpen(false)
+    if (selectedRoundType === 'behavioral') {
+      navigate('/behavioral-round')
+    } else if (selectedRoundType === 'aptitude') {
+      navigate('/aptitude-round')
+    } else {
+      navigate('/technical-round')
+    }
   }
 
   return (
