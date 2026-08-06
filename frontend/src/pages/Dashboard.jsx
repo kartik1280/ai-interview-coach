@@ -2,6 +2,8 @@ import React, { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { Flame, ChevronRight, Sparkles, X, Sliders, LayoutDashboard, CheckCircle2, Play } from 'lucide-react'
+import { useEffect } from "react";
+import { supabase } from "../lib/supabase";
 
 // Helper for score tier colors
 const getScoreColor = (score) => {
@@ -22,6 +24,19 @@ export default function Dashboard() {
   }
 
   const initialLetter = (userProfile.fullName || 'S').charAt(0).toUpperCase()
+
+  useEffect(() => {
+    async function testConnection() {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("*");
+
+    console.log("Data:", data);
+    console.log("Error:", error);
+  }
+
+    testConnection();
+  }, []);
 
   // State for practice rounds
   const [rounds, setRounds] = useState([
