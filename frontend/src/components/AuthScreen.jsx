@@ -1,4 +1,5 @@
 import React, { useState } from 'react'
+import { signUp, signIn } from '../services/authservice'
 import { motion } from 'framer-motion'
 import { useNavigate } from 'react-router-dom'
 import { UserPlus, LogIn, Disc, CheckCircle, Terminal, Eye, EyeOff } from 'lucide-react'
@@ -19,16 +20,36 @@ export default function AuthScreen({ initialMode = 'signup', onEject }) {
     setFormData((prev) => ({ ...prev, [e.target.name]: e.target.value }))
   }
 
-  const handleSubmit = (e) => {
-    e.preventDefault()
-    setIsSubmitting(true)
-    // Simulate system boot authentication sequence, then navigate straight to /create-interview
+const handleSubmit = async (e) => {
+  e.preventDefault()
+  setIsSubmitting(true)
+
+  try {
+    if (mode === 'signup') {
+      await signUp(
+        formData.email,
+        formData.password
+      )
+    } else {
+      await signIn(
+        formData.email,
+        formData.password
+      )
+    }
+
+    setSubmitted(true)
+
     setTimeout(() => {
-      setIsSubmitting(false)
-      setSubmitted(true)
       navigate('/create-interview')
     }, 1200)
+
+  } catch (error) {
+    console.error('Authentication error:', error)
+    alert(error.message)
+  } finally {
+    setIsSubmitting(false)
   }
+}
 
   return (
     <div className="w-full h-full flex flex-col justify-between p-3 sm:p-4 text-stone-200 font-mono text-xs overflow-y-auto crt-scrollbar animate-crt-turn-on">
