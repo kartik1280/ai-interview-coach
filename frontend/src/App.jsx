@@ -8,19 +8,72 @@ import FullReport from './pages/FullReport'
 import TechnicalRound from './pages/TechnicalRound'
 import BehavioralRound from './pages/BehavioralRound'
 import AptitudeRound from './pages/AptitudeRound'
+import ProtectedRoute from './components/ProtectedRoute'
 
 function App() {
   return (
     <BrowserRouter>
       <Routes>
+        {/* Public Route */}
         <Route path="/" element={<LandingPage />} />
-        <Route path="/create-interview" element={<CreateInterview />} />
-        <Route path="/dashboard" element={<Dashboard />} />
-        <Route path="/settings" element={<Settings />} />
-        <Route path="/full-report" element={<FullReport />} />
-        <Route path="/technical-round" element={<TechnicalRound />} />
-        <Route path="/behavioral-round" element={<BehavioralRound />} />
-        <Route path="/aptitude-round" element={<AptitudeRound />} />
+
+        {/* Protected Routes */}
+        <Route
+          path="/create-interview"
+          element={
+            <ProtectedRoute>
+              <CreateInterview />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/dashboard"
+          element={
+            <ProtectedRoute>
+              <Dashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/settings"
+          element={
+            <ProtectedRoute>
+              <Settings />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/full-report"
+          element={
+            <ProtectedRoute>
+              <FullReport />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/technical-round"
+          element={
+            <ProtectedRoute>
+              <TechnicalRound />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/behavioral-round"
+          element={
+            <ProtectedRoute>
+              <BehavioralRound />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/aptitude-round"
+          element={
+            <ProtectedRoute>
+              <AptitudeRound />
+            </ProtectedRoute>
+          }
+        />
       </Routes>
     </BrowserRouter>
   )

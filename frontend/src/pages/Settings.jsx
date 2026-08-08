@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { motion } from 'framer-motion'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { LayoutDashboard, Sliders, LogOut, ShieldAlert, Save, CheckCircle2, User, Bell, Volume2, Sparkles, Moon } from 'lucide-react'
+import { signOut } from '../services/authservice'
 
 export default function Settings() {
   const navigate = useNavigate()
@@ -31,8 +32,13 @@ export default function Settings() {
     setTimeout(() => setSavedSuccess(false), 2500)
   }
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
     if (window.confirm("Are you sure you want to log out?")) {
+      try {
+        await signOut()
+      } catch (err) {
+        console.error('Logout error:', err)
+      }
       navigate('/')
     }
   }

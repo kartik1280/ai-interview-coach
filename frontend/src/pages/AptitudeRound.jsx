@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, Timer, CheckCircle2, HelpCircle, Sparkles, RefreshCcw, ThumbsUp, ThumbsDown, MessageSquare } from 'lucide-react'
+import { ArrowLeft, Timer, CheckCircle2, HelpCircle, Pause, Play, RotateCcw, AlertCircle, Plus, ThumbsUp, ThumbsDown, MessageSquare } from 'lucide-react'
 
 const APTITUDE_QUESTIONS = [
   {
@@ -54,27 +54,54 @@ export default function AptitudeRound() {
   const [selectedOption, setSelectedOption] = useState(null)
   const [showExplanation, setShowExplanation] = useState(false)
   const [scratchpad, setScratchpad] = useState('')
-  const [timeLeft, setTimeLeft] = useState(900) // 15 minutes timer
+  const [isSubmitted, setIsSubmitted] = useState(false)
+
+  // 15 Minutes Timer State (900 seconds)
+  const [timeLeft, setTimeLeft] = useState(900)
+  const [isTimerActive, setIsTimerActive] = useState(true)
+  const [showTimeUpModal, setShowTimeUpModal] = useState(false)
 
   const currentQ = APTITUDE_QUESTIONS[currentIdx]
 
+  // Timer Effect with Auto-Submit on Expiry
   useEffect(() => {
-    const timer = setInterval(() => {
-      setTimeLeft((prev) => (prev > 0 ? prev - 1 : 0))
-    }, 1000)
-    return () => clearInterval(timer)
-  }, [])
+    let interval = null
+    if (isTimerActive && timeLeft > 0) {
+      interval = setInterval(() => {
+        setTimeLeft((prev) => prev - 1)
+      }, 1000)
+    } else if (timeLeft === 0 && isTimerActive) {
+      setIsTimerActive(false)
+      setIsSubmitted(true)
+      setShowExplanation(true)
+      setShowTimeUpModal(true)
+    }
+    return () => clearInterval(interval)
+  }, [isTimerActive, timeLeft])
 
   const formatTime = (secs) => {
     const mins = Math.floor(secs / 60)
     const s = secs % 60
-    return `${mins}:${s < 10 ? '0' : ''}${s}`
+    return `${mins < 10 ? '0' : ''}${mins}:${s < 10 ? '0' : ''}${s}`
+  }
+
+  const getTimerBadgeStyle = () => {
+    if (timeLeft === 0) return 'bg-red-600 text-white font-extrabold border-red-700 animate-bounce'
+    if (timeLeft <= 60) return 'bg-red-100 text-red-700 border-red-400 font-extrabold animate-pulse'
+    if (timeLeft <= 300) return 'bg-amber-100 text-amber-800 border-amber-300 font-bold'
+    return 'bg-white text-stone-800 border-stone-300 font-bold'
   }
 
   const handleNextQuestion = () => {
     setCurrentIdx((prev) => (prev + 1) % APTITUDE_QUESTIONS.length)
     setSelectedOption(null)
     setShowExplanation(false)
+  }
+
+  const handleSubmitAssessment = () => {
+    setIsSubmitted(true)
+    setIsTimerActive(false)
+    setShowExplanation(true)
   }
 
   return (
@@ -96,11 +123,6 @@ export default function AptitudeRound() {
         </div>
 
         <div className="flex items-center gap-6 font-radio text-sm font-bold text-stone-600">
-          <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-100/70 border border-amber-300 text-amber-900 font-mono text-xs">
-            <Timer className="w-3.5 h-3.5 text-amber-700" />
-            <span>{formatTime(timeLeft)}</span>
-          </div>
-
           <button onClick={() => navigate('/dashboard')} className="hover:text-black transition-colors cursor-pointer">
             Interview Start
           </button>
@@ -112,7 +134,7 @@ export default function AptitudeRound() {
 
       {/* Main Container */}
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 flex flex-col gap-6">
-        {/* Title Header Bar */}
+        {/* Title Header Bar & Interactive Timer Controls */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="text-left">
             <h1 className="font-serif font-bold text-3xl text-black">
@@ -123,24 +145,54 @@ export default function AptitudeRound() {
             </p>
           </div>
 
-          <div className="flex items-center gap-2">
-            {APTITUDE_QUESTIONS.map((q, idx) => (
+          <div className="flex items-center gap-3">
+            {/* Interactive Timer Badge */}
+            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border-2 shadow-xs transition-all ${getTimerBadgeStyle()}`}>
+              <Timer className="w-4 h-4" />
+              <span className="font-mono text-sm tracking-wider">{formatTime(timeLeft)}</span>
+
               <button
-                key={q.id}
-                onClick={() => {
-                  setCurrentIdx(idx)
-                  setSelectedOption(null)
-                  setShowExplanation(false)
-                }}
-                className={`w-8 h-8 rounded-full font-bold text-xs transition-all cursor-pointer ${
-                  currentIdx === idx
-                    ? 'bg-black text-white'
-                    : 'bg-stone-200 text-stone-700 hover:bg-stone-300'
-                }`}
+                onClick={() => setIsTimerActive(!isTimerActive)}
+                className="p-1 hover:bg-black/10 rounded transition-colors cursor-pointer ml-1"
+                title={isTimerActive ? "Pause Timer" : "Resume Timer"}
               >
-                {idx + 1}
+                {isTimerActive ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5 fill-current" />}
               </button>
-            ))}
+
+              <button
+                onClick={() => {
+                  setTimeLeft(900)
+                  setIsTimerActive(true)
+                  setShowTimeUpModal(false)
+                  setIsSubmitted(false)
+                }}
+                className="p-1 hover:bg-black/10 rounded transition-colors cursor-pointer"
+                title="Reset Timer"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            {/* Question Numbers Tabs */}
+            <div className="flex items-center gap-1.5 ml-2">
+              {APTITUDE_QUESTIONS.map((q, idx) => (
+                <button
+                  key={q.id}
+                  onClick={() => {
+                    setCurrentIdx(idx)
+                    setSelectedOption(null)
+                    setShowExplanation(false)
+                  }}
+                  className={`w-8 h-8 rounded-full font-bold text-xs transition-all cursor-pointer ${
+                    currentIdx === idx
+                      ? 'bg-black text-white'
+                      : 'bg-stone-200 text-stone-700 hover:bg-stone-300'
+                  }`}
+                >
+                  {idx + 1}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 
@@ -167,7 +219,8 @@ export default function AptitudeRound() {
                 {currentQ.options.map((opt, optIdx) => (
                   <button
                     key={optIdx}
-                    onClick={() => setSelectedOption(optIdx)}
+                    onClick={() => !isSubmitted && setSelectedOption(optIdx)}
+                    disabled={isSubmitted}
                     className={`w-full p-4 rounded-xl border-2 text-left font-radio font-bold text-sm transition-all cursor-pointer flex items-center justify-between ${
                       selectedOption === optIdx
                         ? 'border-black bg-stone-50 shadow-xs'
@@ -193,12 +246,22 @@ export default function AptitudeRound() {
                 <span>{showExplanation ? 'Hide Explanation' : 'Check Explanation'}</span>
               </button>
 
-              <button
-                onClick={handleNextQuestion}
-                className="bg-[#94B48F] hover:bg-[#83A37E] active:scale-95 text-white font-radio font-bold text-xs px-6 py-2.5 rounded-xl transition-all cursor-pointer shadow-xs"
-              >
-                Next Question →
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleSubmitAssessment}
+                  className="bg-black hover:bg-stone-800 text-white font-radio font-bold text-xs px-5 py-2.5 rounded-xl transition-all cursor-pointer shadow-xs flex items-center gap-1.5"
+                >
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                  <span>Submit Assessment</span>
+                </button>
+
+                <button
+                  onClick={handleNextQuestion}
+                  className="bg-[#94B48F] hover:bg-[#83A37E] active:scale-95 text-white font-radio font-bold text-xs px-5 py-2.5 rounded-xl transition-all cursor-pointer shadow-xs"
+                >
+                  Next →
+                </button>
+              </div>
             </div>
           </div>
 
@@ -215,6 +278,20 @@ export default function AptitudeRound() {
               placeholder="Use this area to write down your estimation formulas, ratio breakdowns, or scratch calculations..."
               className="w-full h-44 bg-white border border-stone-300 rounded-xl p-3 font-mono text-xs text-stone-800 focus:outline-none focus:ring-2 focus:ring-black resize-none"
             />
+
+            {isSubmitted && (
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="p-4 rounded-xl bg-emerald-100 border border-emerald-400 text-emerald-900 text-xs font-bold flex items-center gap-2"
+              >
+                <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+                <div>
+                  <p>Assessment Answers Submitted!</p>
+                  <p className="text-[11px] font-normal text-emerald-800">Time Taken: {formatTime(900 - timeLeft)} · Score: 8.8/10</p>
+                </div>
+              </motion.div>
+            )}
 
             {/* Explanation Box */}
             <AnimatePresence>
@@ -250,6 +327,57 @@ export default function AptitudeRound() {
           </button>
         </div>
       </main>
+
+      {/* Time's Up Alert Modal for Aptitude Round */}
+      <AnimatePresence>
+        {showTimeUpModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs select-none">
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="w-full max-w-md bg-white border-2 border-black rounded-3xl p-6 shadow-[6px_6px_0px_0px_#000000] text-center flex flex-col items-center gap-4"
+            >
+              <div className="w-14 h-14 rounded-full bg-red-100 text-red-600 flex items-center justify-center border-2 border-red-500 shadow-sm">
+                <AlertCircle className="w-8 h-8" />
+              </div>
+
+              <h2 className="font-serif text-2xl font-bold text-black">
+                Time's Up! ⏱️
+              </h2>
+
+              <p className="text-xs text-stone-600 max-w-xs">
+                The 15-minute aptitude assessment time limit has expired. Your answers up to this point have been automatically submitted.
+              </p>
+
+              <div className="flex items-center justify-center gap-3 w-full mt-2">
+                <button
+                  onClick={() => {
+                    setTimeLeft(300)
+                    setIsTimerActive(true)
+                    setShowTimeUpModal(false)
+                  }}
+                  className="w-1/2 bg-white border-2 border-black text-black font-radio font-bold text-xs py-3 rounded-xl hover:bg-stone-100 transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>+5 Mins</span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    setShowTimeUpModal(false)
+                    handleSubmitAssessment()
+                  }}
+                  className="w-1/2 bg-black text-white font-radio font-bold text-xs py-3 rounded-xl hover:bg-stone-800 transition-all cursor-pointer flex items-center justify-center gap-1.5 shadow-md"
+                >
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                  <span>View Results</span>
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   )
 }
