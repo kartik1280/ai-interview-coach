@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { motion } from 'framer-motion'
 import { useNavigate } from 'react-router-dom'
 import { FileText, UploadCloud, X, ArrowRight, CheckCircle2, Sparkles } from 'lucide-react'
+import { supabase } from '../lib/supabase'
 
 export default function CreateInterview() {
   const navigate = useNavigate()
@@ -11,10 +12,7 @@ export default function CreateInterview() {
     industry: ''
   })
 
-  const [file, setFile] = useState({
-    name: 'Sameer_Resume.pdf',
-    size: '312 KB'
-  })
+  const [file, setFile] = useState(null)
 
   const [isGenerating, setIsGenerating] = useState(false)
   const [generated, setGenerated] = useState(false)
@@ -25,8 +23,10 @@ export default function CreateInterview() {
 
   const handleFileUpload = (e) => {
     const uploaded = e.target.files?.[0]
+
     if (uploaded) {
       setFile({
+        file: uploaded,
         name: uploaded.name,
         size: `${Math.round(uploaded.size / 1024)} KB`
       })
@@ -37,26 +37,107 @@ export default function CreateInterview() {
     setFile(null)
   }
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault()
     setIsGenerating(true)
 
-    // Simulate interview environment generation
-    setTimeout(() => {
+    try {
+      // 1. Get the currently authenticated user
+      const {
+        data: { user },
+        error: userError
+      } = await supabase.auth.getUser()
+
+      if (userError) {
+        throw userError
+      }
+
+      if (!user) {
+        throw new Error('No authenticated user found')
+      }
+
+      // 2. Make sure a resume has actually been selected
+      if (!file?.file) {
+        throw new Error('Please upload your resume first')
+      }
+
+      // 3. Create a unique storage path for this user's resume
+      const filePath = `${user.id}/${crypto.randomUUID()}-${file.file.name}`
+
+      // 4. Upload the actual file to Supabase Storage
+      const { error: uploadError } = await supabase.storage
+        .from('resumes')
+        .upload(filePath, file.file)
+
+      if (uploadError) {
+        throw uploadError
+      }
+
+      // 5. Create a record in the resumes table
+      const { data: resumeData, error: resumeError } = await supabase
+        .from('resumes')
+        .insert({
+          user_id: user.id,
+          filename: file.file.name,
+          file_size: file.file.size,
+          storage_path: filePath
+        })
+        .select()
+        .single()
+
+      if (resumeError) {
+        // Remove uploaded file if database insert fails
+        await supabase.storage
+          .from('resumes')
+          .remove([filePath])
+
+        throw resumeError
+      }
+
+      // 6. Connect this resume to the user's profile
+      const { error: profileError } = await supabase
+        .from('profiles')
+        .update({
+          resume_id: resumeData.id
+        })
+        .eq('id', user.id)
+
+      if (profileError) {
+        // Clean up both records if profile update fails
+        await supabase.storage
+          .from('resumes')
+          .remove([filePath])
+
+        await supabase
+          .from('resumes')
+          .delete()
+          .eq('id', resumeData.id)
+
+        throw profileError
+      }
+
+      // 7. Everything succeeded
       setIsGenerating(false)
       setGenerated(true)
 
-      // Automatically transition directly to Dashboard with user profile state
+      // 8. Continue to dashboard
       setTimeout(() => {
         navigate('/dashboard', {
           state: {
-            fullName: formData.fullName || 'Sameer Mishra',
-            targetPosition: formData.targetPosition || 'Frontend Developer',
-            industry: formData.industry || 'Tech'
+            fullName: formData.fullName,
+            targetPosition: formData.targetPosition,
+            industry: formData.industry
           }
         })
       }, 1200)
-    }, 1400)
+
+    } catch (error) {
+      console.error('Error saving interview profile:', error)
+
+      setIsGenerating(false)
+
+      alert(`Failed to save your profile: ${error.message}`)
+    }
   }
 
   return (

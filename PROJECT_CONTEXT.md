@@ -1,15 +1,15 @@
 # AI Interview Coach / InterviewOS — Current Project Context
 
-This document reflects the current state of the project as of 2026-08-07. It summarizes the work implemented so far, the app structure, and the remaining gaps.
+This document reflects the current state of the project as of 2026-08-08. It captures the implemented frontend experience, the current architecture, and the remaining gaps that still need to be built out.
 
 ---
 
 ## 1. Product Summary
 
-AI Interview Coach is a polished frontend-first mock interview experience designed to feel like a real interview preparation platform. The product is positioned as an MVP with a retro computer aesthetic and a guided flow through:
+AI Interview Coach is a frontend-first mock interview experience designed to feel like a polished prep platform for job seekers. The experience is centered around a retro-computing visual language and a guided path through:
 
 - landing and onboarding
-- profile creation
+- profile setup
 - dashboard and progress tracking
 - technical, behavioral, and aptitude practice rounds
 - a full performance report
@@ -18,26 +18,26 @@ The UI branding currently uses the name InterviewOS, while the repository remain
 
 ---
 
-## 2. What Has Been Implemented So Far
+## 2. What Is Implemented Right Now
 
 ### Frontend experience
-- landing page with a CRT-style hero experience
-- scroll-driven storytelling sequence
-- floppy-disk interaction that opens an auth experience
-- create interview form with profile inputs and resume upload UI
-- dashboard with readiness score, streak, history, and practice round entry points
-- technical round experience with a coding editor, local runner, and submit state
-- behavioral round experience with a simulated AI interviewer and STAR-style feedback
-- aptitude round experience with a question navigator, countdown timer, scratchpad, and explanation panel
-- full report page with score comparison and highlight sections
-- route-based navigation across all major screens
+- immersive landing page with a CRT-style hero section and animated scroll storytelling
+- floppy-disk entry interaction that opens an auth experience
+- create-interview form with full name, target position, industry, and resume upload UI
+- dashboard with readiness score, day streak, round history, and practice round entry points
+- technical round with a Monaco-based coding editor, local execution runner, timer, and submission state
+- behavioral round with a simulated AI interviewer, answer input, microphone-style interaction, and STAR-style feedback UI
+- aptitude round with timed questions, a scratchpad, explanation panel, and auto-submit behavior on timeout
+- full report page with score comparison, highlights, STAR breakdown support, and PDF export
+- route-based navigation across the main app flow
 
-### Initial integration work
-- Supabase client configured in the frontend using environment variables
-- frontend environment file created for Supabase connection settings
+### Authentication and routing
+- Supabase authentication is wired into the frontend for sign up, sign in, and sign out
+- protected routes guard the main interview screens and redirect unauthenticated users to the landing page
+- the app currently uses client-side routing with React Router and state passed between screens
 
 ### Current reality
-The app is currently a strong frontend prototype with mostly local/demo data and simulated interactions. It is not yet connected to a real backend or live AI pipeline.
+The app is best described as a high-fidelity frontend prototype with advanced UI polish and simulated interactions. It is not yet fully connected to a production backend, real AI question generation, or persistent interview state.
 
 ---
 
@@ -51,17 +51,19 @@ The app is currently a strong frontend prototype with mostly local/demo data and
 - Framer Motion
 - Lucide React
 - Recharts
+- Monaco Editor via @monaco-editor/react
+- html2canvas + jsPDF for report export
 - Supabase JS client
 
 ### Backend
 - Backend folder exists and is prepared for future API work
-- Current backend state is minimal: only environment example scaffolding is present
+- Current backend state is minimal: only environment scaffolding is present
 
 ### Planned backend services
 - FastAPI (Python)
-- Supabase database/auth/storage
-- OpenAI API for resume parsing and AI-generated feedback
-- PyMuPDF for PDF resume extraction
+- Supabase Postgres/Auth/Storage
+- OpenAI API for resume parsing, question generation, and scoring feedback
+- PyMuPDF for extracting text from uploaded resumes
 
 ---
 
@@ -95,26 +97,31 @@ ai-interview-coach/
         │   ├── Footer.jsx
         │   ├── HowItWorksSection.jsx
         │   ├── Navbar.jsx
+        │   ├── ProtectedRoute.jsx
         │   ├── ReviewsSection.jsx
         │   └── ScrollSequenceScreen.jsx
-        └── pages/
-            ├── AptitudeRound.jsx
-            ├── BehavioralRound.jsx
-            ├── CreateInterview.jsx
-            ├── Dashboard.jsx
-            ├── FullReport.jsx
-            ├── LandingPage.jsx
-            ├── Settings.jsx
-            └── TechnicalRound.jsx
+        ├── lib/
+        │   └── supabase.js
+        ├── pages/
+        │   ├── AptitudeRound.jsx
+        │   ├── BehavioralRound.jsx
+        │   ├── CreateInterview.jsx
+        │   ├── Dashboard.jsx
+        │   ├── FullReport.jsx
+        │   ├── LandingPage.jsx
+        │   ├── Settings.jsx
+        │   └── TechnicalRound.jsx
+        └── services/
+            └── authservice.js
 ```
 
 ---
 
-## 5. App Architecture
+## 5. Current App Architecture
 
 ### Entry points
-- frontend/src/main.jsx mounts the app into the DOM
-- frontend/src/App.jsx defines the routing structure
+- frontend/src/main.jsx mounts the React app into the DOM
+- frontend/src/App.jsx defines the main route configuration
 
 ### Current routes
 - / → LandingPage
@@ -126,69 +133,74 @@ ai-interview-coach/
 - /behavioral-round → BehavioralRound
 - /aptitude-round → AptitudeRound
 
+### Authentication flow
+- ProtectedRoute checks the Supabase session on mount and on auth state changes
+- unauthenticated users are redirected to the landing page
+- authenticated users can access the interview flow
+
 ### Data flow pattern
-- the app is driven mainly by local React state
-- profile info is passed between pages using React Router state
-- the UI simulates round completion, scoring, and feedback
-- no production backend persistence is wired up yet
+- the app is mainly driven by local React state and router state
+- profile details are passed through navigation state from Create Interview to Dashboard and Report screens
+- round screens currently use local demo content rather than persisted backend data
 
 ---
 
 ## 6. Page-by-Page Notes
 
 ### Landing page
-- built as an immersive intro experience with retro styling
-- uses Framer Motion for scroll-based visual transitions
-- includes interactive sections for product explanation, features, reviews, and footer
+- built as an immersive intro experience with a retro-terminal aesthetic
+- includes scroll-driven storytelling, feature sections, reviews, and the footer
+- uses animated transitions and a branded CRT-style presentation
 
 ### Create Interview page
-- collects full name, target position, industry, and resume file input
-- simulates interview setup generation and then navigates to the dashboard
-- passes profile information to later screens via router state
+- collects full name, target role, industry, and a resume upload
+- simulates the setup of a personalized interview environment
+- redirects to the dashboard after a short success state
 
 ### Dashboard page
-- serves as the main hub after profile creation
-- shows readiness score, rounds history, and improvement areas
-- includes a practice-round modal that routes the user to the appropriate mock interview page
+- acts as the main hub after profile creation
+- shows readiness score, round history, streak, and a modal for selecting a practice round
+- uses locally mocked round data and feedback cards
 
 ### Technical Round page
-- presents coding problems with starter code and a local JavaScript runner
-- allows the user to edit code, run it locally, and submit a solution
-- uses mock feedback rather than a real judge or backend service
+- presents coding problems with starter code and a local JavaScript execution runner
+- supports switching problems, changing languages, running code, and submitting solutions
+- uses a local timer and simulated feedback rather than a real judge
 
 ### Behavioral Round page
-- simulates an AI interviewer behaviour with questions and feedback
-- includes a microphone-style input button and a STAR-method feedback card
-- currently functions as a UI simulation only
+- simulates an AI interviewer experience with a question-by-question flow
+- includes textarea input and a microphone-style interaction for voice-style demo behavior
+- shows a STAR-method feedback card after analysis
 
 ### Aptitude Round page
-- shows reasoning and estimation questions with explanation and scratchpad support
-- includes a countdown timer and navigation between questions
+- includes timed reasoning and estimation questions
+- provides a scratchpad and explanation panel
+- auto-submits and reveals explanations when the timer expires
 
 ### Full Report page
-- summarizes practice round performance in a report-style layout
-- uses Recharts to render a score comparison chart
-- currently relies on state passed from the dashboard or local fallback data
+- summarizes performance across practice rounds
+- includes a bar chart, best/worst answer highlights, and optional STAR breakdown data
+- supports PDF export using html2canvas and jsPDF
 
 ### Settings page
 - route exists and is wired into navigation
-- currently serves as a placeholder/unfinished screen compared to the rest of the app
+- currently serves as a placeholder/unfinished area compared with the rest of the app
 
 ---
 
 ## 7. Reusable UI Components
 
 ### AuthScreen
-- handles the sign-up/login experience shown through the floppy-disk interaction
+- used for the sign-in/sign-up experience surfaced through the floppy-disk interaction
 
 ### CRTMonitor
-- creates the retro screen container and monitor frame
+- wraps the main retro display experience and visual frame
 
 ### ScrollSequenceScreen
-- drives the animated scrolling sequence inside the hero experience
+- powers the animated scroll-based storytelling sequence on the landing page
 
 ### FloppyDiskModal
-- provides the disk insertion interaction and auth entry point
+- handles the disk insertion interaction and auth entry point
 
 ### Other shared sections
 - Navbar, FeaturesSection, HowItWorksSection, ReviewsSection, Footer
@@ -212,41 +224,44 @@ The styling system is implemented with Tailwind CSS and custom utility classes i
 
 ## 9. Current Status and Gaps
 
-### Implemented well
-- end-to-end frontend flow for the mock interview experience
-- polished visual UI and screen transitions
-- route-based app structure
-- Supabase email/password auth flow with signup/login
+### What is working well
+- polished end-to-end frontend flow for the mock interview experience
+- strong visual UI and animated transitions
+- protected authenticated route flow
+- Supabase email/password auth flow for signup and login
+- multiple interactive round experiences with realistic UI behavior
 
 ### Still pending
 - real backend API implementation beyond Supabase auth
 - resume upload parsing and storage
-- true AI question generation and scoring
+- real AI question generation and answer scoring
 - persistence of interview state in a database
-- completion of the settings page and deeper report logic
+- deeper report logic based on actual round data
+- completion of the settings experience
+- production-ready data model and API contracts
 
 ### Summary
-The project is currently best described as a high-fidelity frontend prototype with a strong UX foundation and a clear path toward backend integration.
-
-- screen glow and vignette
-- flicker animation
-- turn-on animation
-- custom scrollbar styling for the CRT screen
-
-The style system is intentionally expressive and should be preserved when building new features.
+The project is currently a strong frontend prototype with a clear product direction and a realistic path toward backend integration. It is ready for the next phase: replacing mocked behavior with API-backed interview workflows and AI-powered feedback.
 
 ---
 
 ## 10. Current State of Data and Persistence
 
-At the moment, the app does not have a real persistent backend connection.
+At the moment, the app does not have a fully persistent backend connection for interviews or reports.
 
-### Current static/demo data patterns
-- Dashboard uses hardcoded rounds and feedback
-- Behavioral questions are local constants inside the page component
-- Aptitude questions are local constants inside the page component
-- Create Interview uses local form state and simulated success
-- Auth screen uses Supabase auth calls from `frontend/src/services/authservice.js` and navigates on successful signup/login
+### Current demo data patterns
+- dashboard round cards and feedback are local static arrays
+- behavioral questions are local constants in the page component
+- aptitude questions are local constants in the page component
+- create interview uses local form state and a simulated success transition
+- auth uses Supabase auth calls from frontend/src/services/authservice.js
+
+### Important next steps
+- build a backend API layer for auth, profile creation, and interview rounds
+- connect the frontend to real endpoints rather than relying on router state and local mock arrays
+- implement resume parsing and storage
+- connect AI-powered question generation and scoring
+- introduce backend persistence for rounds, answers, and reports
 
 ### Planned persistence model
 The README describes a backend schema with these tables:
