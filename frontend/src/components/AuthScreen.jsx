@@ -40,7 +40,11 @@ const handleSubmit = async (e) => {
     setSubmitted(true)
 
     setTimeout(() => {
-      navigate('/create-interview')
+      if (mode === 'signup') {
+        navigate('/create-interview')
+      } else {
+        navigate('/dashboard')
+      }
     }, 1200)
 
   } catch (error) {
