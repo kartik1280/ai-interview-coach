@@ -42,100 +42,81 @@ export default function CreateInterview() {
     setIsGenerating(true)
 
     try {
-      // 1. Get the currently authenticated user
+      // 1. Get the current session token
       const {
-        data: { user },
-        error: userError
-      } = await supabase.auth.getUser()
+        data: { session },
+        error: sessionError
+      } = await supabase.auth.getSession()
 
-      if (userError) {
-        throw userError
+      if (sessionError || !session) {
+        throw new Error('No active user session found. Please log in again.')
       }
 
-      if (!user) {
-        throw new Error('No authenticated user found')
-      }
+      const token = session.access_token
 
       // 2. Make sure a resume has actually been selected
       if (!file?.file) {
         throw new Error('Please upload your resume first')
       }
 
-      // 3. Create a unique storage path for this user's resume
-      const filePath = `${user.id}/${crypto.randomUUID()}-${file.file.name}`
+      // 3. Upload the file to the backend
+      const resumeFormData = new FormData()
+      resumeFormData.append('file', file.file)
 
-      // 4. Upload the actual file to Supabase Storage
-      const { error: uploadError } = await supabase.storage
-        .from('resumes')
-        .upload(filePath, file.file)
+      const uploadResponse = await fetch(`${import.meta.env.VITE_API_BASE_URL}/resume/upload`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        },
+        body: resumeFormData
+      })
 
-      if (uploadError) {
-        throw uploadError
+      if (!uploadResponse.ok) {
+        const errData = await uploadResponse.json()
+        throw new Error(errData.detail || 'Failed to upload and parse resume')
       }
 
-      // 5. Create a record in the resumes table
-      const { data: resumeData, error: resumeError } = await supabase
-        .from('resumes')
-        .insert({
-          user_id: user.id,
-          filename: file.file.name,
-          file_size: file.file.size,
-          storage_path: filePath
+      const resumeData = await uploadResponse.json()
+
+      // 4. Connect profile details on backend
+      const profileResponse = await fetch(`${import.meta.env.VITE_API_BASE_URL}/interview/create`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          fullName: formData.fullName,
+          targetPosition: formData.targetPosition,
+          industry: formData.industry
         })
-        .select()
-        .single()
+      })
 
-      if (resumeError) {
-        // Remove uploaded file if database insert fails
-        await supabase.storage
-          .from('resumes')
-          .remove([filePath])
-
-        throw resumeError
+      if (!profileResponse.ok) {
+        const errData = await profileResponse.json()
+        throw new Error(errData.detail || 'Failed to initialize your profile details')
       }
 
-      // 6. Connect this resume to the user's profile
-      const { error: profileError } = await supabase
-        .from('profiles')
-        .update({
-          resume_id: resumeData.id
-        })
-        .eq('id', user.id)
+      const profileData = await profileResponse.json()
 
-      if (profileError) {
-        // Clean up both records if profile update fails
-        await supabase.storage
-          .from('resumes')
-          .remove([filePath])
-
-        await supabase
-          .from('resumes')
-          .delete()
-          .eq('id', resumeData.id)
-
-        throw profileError
-      }
-
-      // 7. Everything succeeded
+      // 5. Everything succeeded
       setIsGenerating(false)
       setGenerated(true)
 
-      // 8. Continue to dashboard
+      // 6. Continue to dashboard with backend data
       setTimeout(() => {
         navigate('/dashboard', {
           state: {
-            fullName: formData.fullName,
-            targetPosition: formData.targetPosition,
-            industry: formData.industry
+            fullName: profileData.fullName,
+            targetPosition: profileData.targetPosition,
+            industry: profileData.industry
           }
         })
       }, 1200)
 
     } catch (error) {
       console.error('Error saving interview profile:', error)
-
       setIsGenerating(false)
-
       alert(`Failed to save your profile: ${error.message}`)
     }
   }

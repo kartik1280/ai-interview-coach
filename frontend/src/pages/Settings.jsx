@@ -1,19 +1,23 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { LayoutDashboard, Sliders, LogOut, ShieldAlert, Save, CheckCircle2, User, Bell, Volume2, Sparkles, Moon } from 'lucide-react'
 import { signOut } from '../services/authservice'
+import { supabase } from '../lib/supabase'
 
 export default function Settings() {
   const navigate = useNavigate()
   const location = useLocation()
 
+  const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState(null)
+
   // Initial user state
   const [profile, setProfile] = useState({
-    fullName: location.state?.fullName || 'Sameer Mishra',
-    email: location.state?.email || 'sameer.mishra@example.com',
-    targetPosition: location.state?.targetPosition || 'Frontend Developer',
-    industry: location.state?.industry || 'Tech'
+    fullName: '',
+    email: '',
+    targetPosition: '',
+    industry: ''
   })
 
   // Preference toggles
@@ -22,14 +26,87 @@ export default function Settings() {
   const [themeMode, setThemeMode] = useState('90s B&W TV')
   const [savedSuccess, setSavedSuccess] = useState(false)
 
+  useEffect(() => {
+    const loadProfile = async () => {
+      try {
+        const { data: { session }, error: sessionError } = await supabase.auth.getSession()
+        if (sessionError || !session) {
+          throw new Error('No active user session found. Please log in.')
+        }
+
+        const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/profile`, {
+          headers: {
+            'Authorization': `Bearer ${session.access_token}`
+          }
+        })
+
+        if (!response.ok) {
+          const errData = await response.json()
+          throw new Error(errData.detail || 'Failed to load profile')
+        }
+
+        const data = await response.json()
+        setProfile({
+          fullName: data.fullName,
+          email: session.user?.email || '',
+          targetPosition: data.targetPosition,
+          industry: data.industry
+        })
+      } catch (err) {
+        console.error('Error loading profile settings:', err)
+        setError(err.message)
+      } finally {
+        setIsLoading(false)
+      }
+    }
+    loadProfile()
+  }, [])
+
   const handleChange = (e) => {
     setProfile((prev) => ({ ...prev, [e.target.name]: e.target.value }))
   }
 
-  const handleSaveSettings = (e) => {
+  const handleSaveSettings = async (e) => {
     e.preventDefault()
-    setSavedSuccess(true)
-    setTimeout(() => setSavedSuccess(false), 2500)
+    setSavedSuccess(false)
+    try {
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession()
+      if (sessionError || !session) {
+        throw new Error('No active user session. Please log in.')
+      }
+
+      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/profile`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          fullName: profile.fullName,
+          targetPosition: profile.targetPosition,
+          industry: profile.industry
+        })
+      })
+
+      if (!response.ok) {
+        const errData = await response.json()
+        throw new Error(errData.detail || 'Failed to update profile')
+      }
+
+      const data = await response.json()
+      setProfile((prev) => ({
+        ...prev,
+        fullName: data.fullName,
+        targetPosition: data.targetPosition,
+        industry: data.industry
+      }))
+
+      setSavedSuccess(true)
+      setTimeout(() => setSavedSuccess(false), 2500)
+    } catch (err) {
+      console.error('Error saving profile settings:', err)
+      alert(`Failed to save settings: ${err.message}`)
+    }
   }
 
   const handleLogout = async () => {
@@ -41,6 +118,14 @@ export default function Settings() {
       }
       navigate('/')
     }
+  }
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-[#FCF5E2] flex items-center justify-center font-radio">
+        <div className="text-stone-600 font-bold">Loading your settings...</div>
+      </div>
+    )
   }
 
   return (

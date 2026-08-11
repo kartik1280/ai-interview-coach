@@ -1,7 +1,8 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router-dom'
 import { ArrowLeft, Mic, MicOff, Sparkles, Award, CheckCircle2, ChevronRight, MessageSquare, RefreshCw } from 'lucide-react'
+import { supabase } from '../lib/supabase'
 
 const BEHAVIORAL_QUESTIONS = [
   'Tell me about a time you faced a difficult teammate. What did you do?',
@@ -12,27 +13,70 @@ const BEHAVIORAL_QUESTIONS = [
 
 export default function BehavioralRound() {
   const navigate = useNavigate()
+  const location = useLocation()
+
+  // Retrieve passed round details
+  const roundState = location.state || {}
+  const roundId = roundState.roundId
+  const backendQuestions = roundState.questions || []
+
+  // Fallback to static questions if none passed
+  const questionsList = backendQuestions.length > 0 
+    ? backendQuestions 
+    : BEHAVIORAL_QUESTIONS.map((q, idx) => ({ id: `behavioral-${idx}`, questionText: q }))
+
   const [questionIndex, setQuestionIndex] = useState(0)
   const [userAnswer, setUserAnswer] = useState('')
   const [isRecording, setIsRecording] = useState(false)
   const [showFeedback, setShowFeedback] = useState(false)
   const [isAnalyzing, setIsAnalyzing] = useState(false)
 
-  const currentQuestion = BEHAVIORAL_QUESTIONS[questionIndex]
+  const [evalScore, setEvalScore] = useState(9.1)
+  const [evalFeedback, setEvalFeedback] = useState('Excellent use of STAR method. Clear metrics and STAR structure details.')
+
+  const currentQuestion = questionsList[questionIndex]
 
   const handleNextQuestion = () => {
-    setQuestionIndex((prev) => (prev + 1) % BEHAVIORAL_QUESTIONS.length)
+    setQuestionIndex((prev) => (prev + 1) % questionsList.length)
     setUserAnswer('')
     setShowFeedback(false)
   }
 
-  const handleGiveFeedback = () => {
+  const handleGiveFeedback = async () => {
     setIsAnalyzing(true)
     setShowFeedback(false)
-    setTimeout(() => {
-      setIsAnalyzing(false)
+    try {
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession()
+      if (sessionError || !session) {
+        throw new Error('No active user session. Please log in.')
+      }
+
+      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/round/${roundId}/answer?question_id=${currentQuestion.id}`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          answerText: userAnswer
+        })
+      })
+
+      if (!response.ok) {
+        const errData = await response.json()
+        throw new Error(errData.detail || 'Failed to submit answer')
+      }
+
+      const data = await response.json()
+      setEvalScore(data.score)
+      setEvalFeedback(data.feedback)
       setShowFeedback(true)
-    }, 1200)
+    } catch (err) {
+      console.error('Error submitting answer:', err)
+      alert(`Feedback generation failed: ${err.message}`)
+    } finally {
+      setIsAnalyzing(false)
+    }
   }
 
   const toggleRecording = () => {
@@ -122,7 +166,7 @@ export default function BehavioralRound() {
 
           {/* Question Text */}
           <h2 className="font-serif font-bold text-xl sm:text-2xl text-black leading-snug mb-6">
-            "{currentQuestion}"
+            "{currentQuestion.questionText}"
           </h2>
 
           {/* User Answer Input Box */}
@@ -192,7 +236,7 @@ export default function BehavioralRound() {
                   AI STAR METHOD EVALUATION
                 </span>
                 <span className="font-radio font-extrabold text-base text-[#2F8F6E]">
-                  9.1 / 10
+                  {evalScore} / 10
                 </span>
               </div>
 
@@ -215,10 +259,9 @@ export default function BehavioralRound() {
                 </div>
               </div>
 
-              <ul className="space-y-1.5 text-xs text-stone-700 list-disc list-inside leading-relaxed">
-                <li><strong>Strength:</strong> Excellent structure using clear 1-on-1 conflict resolution steps.</li>
-                <li><strong>Recommendation:</strong> Quantify the final project outcome (e.g. "delivered feature on time with 0 bugs").</li>
-              </ul>
+              <p className="text-xs text-stone-700 leading-relaxed">
+                {evalFeedback}
+              </p>
             </motion.div>
           )}
         </AnimatePresence>
