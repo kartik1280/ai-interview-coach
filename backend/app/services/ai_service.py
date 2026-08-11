@@ -65,9 +65,20 @@ def grade_behavioral_response(question: str, response: str) -> Dict[str, Any]:
         score = min(10, score)
         feedback = f"Demonstrated a structured behavioral response covering {', '.join(matches)}. Solid communication style."
         
+    s_score = round(min(10.0, max(5.0, score * 0.95 + (0.5 if has_situation else 0))), 1)
+    t_score = round(min(10.0, max(5.0, score * 0.90 + 0.5)), 1)
+    a_score = round(min(10.0, max(5.0, score * 1.0 + (0.5 if has_action else 0))), 1)
+    r_score = round(min(10.0, max(5.0, score * 0.92 + (0.8 if has_result else 0))), 1)
+
     return {
         "score": score,
-        "feedback": feedback
+        "feedback": feedback,
+        "star_breakdown": {
+            "situation": s_score,
+            "task": t_score,
+            "action": a_score,
+            "result": r_score
+        }
     }
 
 def grade_aptitude_response(question: str, choice: str) -> Dict[str, Any]:

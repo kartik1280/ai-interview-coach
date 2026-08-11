@@ -33,6 +33,12 @@ export default function BehavioralRound() {
 
   const [evalScore, setEvalScore] = useState(9.1)
   const [evalFeedback, setEvalFeedback] = useState('Excellent use of STAR method. Clear metrics and STAR structure details.')
+  const [starBreakdown, setStarBreakdown] = useState({
+    situation: 9.2,
+    task: 8.8,
+    action: 9.4,
+    result: 9.0
+  })
 
   const currentQuestion = questionsList[questionIndex]
 
@@ -70,6 +76,9 @@ export default function BehavioralRound() {
       const data = await response.json()
       setEvalScore(data.score)
       setEvalFeedback(data.feedback)
+      if (data.starBreakdown) {
+        setStarBreakdown(data.starBreakdown)
+      }
       setShowFeedback(true)
     } catch (err) {
       console.error('Error submitting answer:', err)
@@ -243,19 +252,19 @@ export default function BehavioralRound() {
               <div className="grid grid-cols-4 gap-2 mb-4 text-center">
                 <div className="bg-stone-50 border border-stone-200 p-2 rounded-xl">
                   <span className="text-[10px] font-bold text-stone-500 block">SITUATION</span>
-                  <span className="font-bold text-sm text-[#2F8F6E]">9.2</span>
+                  <span className="font-bold text-sm text-[#2F8F6E]">{starBreakdown.situation}</span>
                 </div>
                 <div className="bg-stone-50 border border-stone-200 p-2 rounded-xl">
                   <span className="text-[10px] font-bold text-stone-500 block">TASK</span>
-                  <span className="font-bold text-sm text-[#2F8F6E]">8.8</span>
+                  <span className="font-bold text-sm text-[#2F8F6E]">{starBreakdown.task}</span>
                 </div>
                 <div className="bg-stone-50 border border-stone-200 p-2 rounded-xl">
                   <span className="text-[10px] font-bold text-stone-500 block">ACTION</span>
-                  <span className="font-bold text-sm text-[#2F8F6E]">9.4</span>
+                  <span className="font-bold text-sm text-[#2F8F6E]">{starBreakdown.action}</span>
                 </div>
                 <div className="bg-stone-50 border border-stone-200 p-2 rounded-xl">
                   <span className="text-[10px] font-bold text-stone-500 block">RESULT</span>
-                  <span className="font-bold text-sm text-[#2F8F6E]">9.0</span>
+                  <span className="font-bold text-sm text-[#2F8F6E]">{starBreakdown.result}</span>
                 </div>
               </div>
 

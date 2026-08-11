@@ -74,6 +74,7 @@ class AnswerSubmitResponse(BaseModel):
     feedback: str
     isCompleted: bool
     overallScore: Optional[float] = None
+    starBreakdown: Optional[Dict[str, float]] = None
 
 # Full Report
 class ReportResponse(BaseModel):

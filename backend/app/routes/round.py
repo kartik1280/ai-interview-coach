@@ -212,11 +212,14 @@ def submit_answer(
                 "status": "completed"
             }).eq("id", id).execute()
             
+        star_breakdown = grade.get("star_breakdown")
+        
         return AnswerSubmitResponse(
             score=score,
             feedback=feedback,
             isCompleted=is_completed,
-            overallScore=overall_score
+            overallScore=overall_score,
+            starBreakdown=star_breakdown
         )
         
     except HTTPException:
