@@ -3,7 +3,11 @@ import { createServer } from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import fetch from 'node-fetch';
+import Groq from 'groq-sdk';
+import { EdgeTTS } from 'node-edge-tts';
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
 
 dotenv.config();
 
@@ -16,8 +20,7 @@ const wss = new WebSocketServer({ server });
 
 const PORT = process.env.PORT || 5001;
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
-const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
-const VOICE_ID = process.env.ELEVENLABS_VOICE_ID || 'EXAVITQu4vr4xnSDxMaL';
+const groq = GROQ_API_KEY ? new Groq({ apiKey: GROQ_API_KEY }) : null;
 
 const getTimeOfDay = () => {
   const hour = new Date().getHours();
@@ -28,17 +31,20 @@ const getTimeOfDay = () => {
 
 const buildSystemPrompt = (candidateName = 'Manik', resumeText = '') => ({
   role: 'system',
-  content: `You are an expert AI Interviewer conducting a fast-paced, 5-minute hands-free mock interview.
+  content: `You are an empathetic, highly conversational, and emotionally intelligent AI interview coach. You speak normally, like a supportive friend who wants to see the candidate succeed.
 
 Candidate Name: ${candidateName}
 Current Time Context: ${getTimeOfDay()}
 
-Instructions:
-1. On the first turn, greet the candidate warmly by name (e.g. "${getTimeOfDay()}, ${candidateName}") and ask an opening question about their resume.
-2. Ask concise theoretical and behavioral questions strictly based on the candidate's resume inside <resume> tags.
-3. Keep every response under 50 words (1-3 spoken sentences).
-4. NEVER use bolding, asterisks, bullet points, markdown, or emojis.
-5. End every turn by asking a question back to the candidate.
+CRITICAL RULES FOR SPEECH RHYTHM & VOICE:
+1. YOU ARE A NATIVE VOICE ASSISTANT speaking out loud over a live audio stream. NEVER say you are text-based or generating words on a screen.
+2. Speak in short, fragmented, casual sentences (1-3 sentences max per turn).
+3. Use em-dashes (—) to indicate a natural pause or a change in thought mid-sentence.
+4. Use ellipses (...) when trailing off or thinking.
+5. Start sentences with natural vocalizations (e.g., "Well...", "Hmm,", "Look,", "Got it,").
+6. If the user says "I don't know", gets frustrated, or struggles, DO NOT just move to the next question. Stop the script. Acknowledge their struggle kindly, give them a gentle hint, or explain the concept simply in one or two sentences before moving on.
+7. React to the user's context. If they sound stuck, validate it. If they give a great answer, hype them up briefly.
+8. Absolutely NO markdown, NO bullet points, NO code blocks, NO emojis, NO asterisks. You are speaking out loud in a fluid conversation.
 
 <resume>
 ${resumeText || 'Candidate pursuing B.S. in Computer Science with experience in React, Node.js, and database systems.'}
@@ -64,21 +70,47 @@ wss.on('connection', (ws) => {
     }
   }, 15000);
 
-  // FIX 2: Generate LLM + TTS with fresh AbortController per turn
+  const generateAndSendAudioChunk = async (text, wsClient, signal) => {
+    if (!text || signal.aborted || wsClient.readyState !== WebSocket.OPEN) return;
+    try {
+      const tts = new EdgeTTS({
+        voice: 'en-US-ChristopherNeural',
+        lang: 'en-US',
+        outputFormat: 'audio-24khz-48kbitrate-mono-mp3'
+      });
+      const tempFile = path.join(os.tmpdir(), `tts_chunk_${Date.now()}_${Math.random().toString(36).substring(7)}.mp3`);
+      await tts.ttsPromise(text, tempFile);
+
+      if (!signal.aborted && fs.existsSync(tempFile)) {
+        const audioBuffer = fs.readFileSync(tempFile);
+        try { fs.unlinkSync(tempFile); } catch (e) {}
+        const base64Audio = audioBuffer.toString('base64');
+        if (wsClient.readyState === WebSocket.OPEN && !signal.aborted) {
+          console.log('[Edge TTS Chunk] Streaming audio chunk to client:', text.substring(0, 30));
+          wsClient.send(JSON.stringify({
+            type: 'audio_chunk',
+            audioBase64: base64Audio,
+            audioContent: base64Audio
+          }));
+        }
+      }
+    } catch (err) {
+      console.error('[Edge TTS Chunk Error]', err.message);
+    }
+  };
+
   const generateTurn = async () => {
-    // Abort previous in-flight turn if running and clear reference
     if (abortController) {
       abortController.abort();
       abortController = null;
     }
 
-    // Always instantiate a BRAND NEW AbortController for the upcoming turn
     const currentController = new AbortController();
     abortController = currentController;
     const { signal } = currentController;
 
     try {
-      if (!GROQ_API_KEY) {
+      if (!groq) {
         if (ws.readyState === WebSocket.OPEN) {
           ws.send(JSON.stringify({ type: 'error', message: 'GROQ_API_KEY missing' }));
         }
@@ -88,77 +120,52 @@ wss.on('connection', (ws) => {
       const systemPrompt = buildSystemPrompt(candidateName, resumeText);
       const groqMessages = [systemPrompt, ...history];
 
-      console.log('[Groq API] Generating new turn response...');
-      const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${GROQ_API_KEY}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          model: 'llama-3.3-70b-versatile',
-          messages: groqMessages,
-          temperature: 0.65,
-          max_tokens: 110
-        }),
-        signal
+      console.log('[Groq Streaming] Starting streaming LLM completion...');
+      const stream = await groq.chat.completions.create({
+        messages: groqMessages,
+        model: 'llama-3.3-70b-versatile',
+        temperature: 0.65,
+        max_tokens: 150,
+        stream: true
       });
 
-      if (signal.aborted) return;
+      let accumulatedText = '';
+      let sentenceBuffer = '';
 
-      if (!groqRes.ok) {
-        const errText = await groqRes.text();
-        console.error('[Groq Error]', groqRes.status, errText);
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Groq API request failed' }));
+      for await (const chunk of stream) {
+        if (signal.aborted || ws.readyState !== WebSocket.OPEN) break;
+
+        const content = chunk.choices[0]?.delta?.content || '';
+        if (!content) continue;
+
+        accumulatedText += content;
+        sentenceBuffer += content;
+
+        ws.send(JSON.stringify({
+          type: 'text_chunk',
+          content,
+          fullText: accumulatedText
+        }));
+
+        // Trigger sentence-level audio chunk generation on major sentence punctuation
+        if (/[.?!—\n]/.test(content) && sentenceBuffer.trim().length > 15) {
+          const textToSpeak = sentenceBuffer.trim();
+          sentenceBuffer = '';
+          generateAndSendAudioChunk(textToSpeak, ws, signal);
         }
-        return;
       }
 
-      const groqData = await groqRes.json();
-      const aiText = groqData.choices?.[0]?.message?.content?.trim();
-
-      if (!aiText || signal.aborted) return;
-
-      console.log('[AI Output]:', aiText);
-      history.push({ role: 'assistant', content: aiText });
-
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'text', content: aiText }));
+      if (!signal.aborted && sentenceBuffer.trim().length > 0) {
+        const finalChunk = sentenceBuffer.trim();
+        sentenceBuffer = '';
+        generateAndSendAudioChunk(finalChunk, ws, signal);
       }
 
-      // ElevenLabs TTS Call
-      if (ELEVENLABS_API_KEY && !signal.aborted) {
-        console.log('[ElevenLabs TTS] Requesting audio stream...');
-        const ttsRes = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}`, {
-          method: 'POST',
-          headers: {
-            'Accept': 'audio/mpeg',
-            'xi-api-key': ELEVENLABS_API_KEY,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            text: aiText,
-            model_id: 'eleven_flash_v2_5',
-            voice_settings: { stability: 0.5, similarity_boost: 0.75 }
-          }),
-          signal
-        });
-
-        if (signal.aborted) return;
-
-        if (ttsRes.ok) {
-          const audioBuffer = await ttsRes.arrayBuffer();
-          if (signal.aborted) return;
-
-          const base64Audio = Buffer.from(audioBuffer).toString('base64');
-          console.log('[ElevenLabs TTS] Audio sent to client.');
-
-          if (ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ type: 'audio', audioBase64: base64Audio }));
-          }
-        } else {
-          console.warn('[TTS Error]', ttsRes.status);
+      if (accumulatedText.trim() && !signal.aborted) {
+        console.log('[AI Output Stream Completed]:', accumulatedText.trim());
+        history.push({ role: 'assistant', content: accumulatedText.trim() });
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'text', content: accumulatedText.trim() }));
         }
       }
     } catch (err) {
@@ -168,14 +175,13 @@ wss.on('connection', (ws) => {
         console.error('[Turn Generation Error]', err.message);
       }
     } finally {
-      // Clear controller reference if this attempt finished
       if (abortController === currentController) {
         abortController = null;
       }
     }
   };
 
-  // Proactive Initiation
+  // Proactive initiation greeting
   setTimeout(() => {
     if (ws.readyState === WebSocket.OPEN) {
       console.log('🚀 Triggering proactive initiation greeting...');
@@ -188,7 +194,6 @@ wss.on('connection', (ws) => {
     try {
       const data = JSON.parse(raw.toString());
 
-      // FIX 2: Interrupt event aborts active fetch and clears controller immediately
       if (data.type === 'interrupt' || data.type === 'speech_started') {
         console.log('⚡ [Interrupt] Client barge-in received. Aborting active generation...');
         if (abortController) {
@@ -208,7 +213,6 @@ wss.on('connection', (ws) => {
         return;
       }
 
-      // User speech payload
       if (data.type === 'user_speech' || data.userMessage) {
         const text = (data.userMessage || data.content || '').trim();
         if (!text) return;
@@ -218,8 +222,7 @@ wss.on('connection', (ws) => {
 
         console.log('[User Speech Received]:', text);
         history.push({ role: 'user', content: text });
-        
-        // Starts fresh turn with brand-new AbortController
+
         generateTurn();
       }
     } catch (err) {
