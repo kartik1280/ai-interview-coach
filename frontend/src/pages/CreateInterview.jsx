@@ -42,100 +42,69 @@ export default function CreateInterview() {
     setIsGenerating(true)
 
     try {
-      // 1. Get the currently authenticated user
-      const {
-        data: { user },
-        error: userError
-      } = await supabase.auth.getUser()
+      let parsedResumeText = ''
 
-      if (userError) {
-        throw userError
+      // 1. Send uploaded resume to Express Backend /api/parse-resume for PDF text extraction
+      if (file?.file) {
+        try {
+          const apiFormData = new FormData()
+          apiFormData.append('resume', file.file)
+
+          const parseRes = await fetch('http://localhost:5050/api/parse-resume', {
+            method: 'POST',
+            body: apiFormData
+          })
+
+          if (parseRes.ok) {
+            const parseData = await parseRes.json()
+            if (parseData.resumeText) {
+              parsedResumeText = parseData.resumeText
+              console.log('✅ Resume parsed successfully:', parsedResumeText.substring(0, 100) + '...')
+            }
+          }
+        } catch (parseErr) {
+          console.warn('Backend parse resume service notice:', parseErr.message)
+        }
       }
 
-      if (!user) {
-        throw new Error('No authenticated user found')
+      // Store context in localStorage for seamless round persistence
+      if (parsedResumeText) {
+        localStorage.setItem('interview_resume_text', parsedResumeText)
+      }
+      localStorage.setItem('candidate_name', formData.fullName || 'Candidate')
+      localStorage.setItem('target_position', formData.targetPosition || 'Software Developer')
+      localStorage.setItem('industry', formData.industry || 'Tech')
+
+      // 2. Optional Supabase integration if logged in
+      try {
+        const { data: { user } } = await supabase.auth.getUser()
+        if (user && file?.file) {
+          const filePath = `${user.id}/${crypto.randomUUID()}-${file.file.name}`
+          await supabase.storage.from('resumes').upload(filePath, file.file)
+        }
+      } catch (sbErr) {
+        // Continue gracefully for demo users
+        console.log('Supabase sync status:', sbErr.message)
       }
 
-      // 2. Make sure a resume has actually been selected
-      if (!file?.file) {
-        throw new Error('Please upload your resume first')
-      }
-
-      // 3. Create a unique storage path for this user's resume
-      const filePath = `${user.id}/${crypto.randomUUID()}-${file.file.name}`
-
-      // 4. Upload the actual file to Supabase Storage
-      const { error: uploadError } = await supabase.storage
-        .from('resumes')
-        .upload(filePath, file.file)
-
-      if (uploadError) {
-        throw uploadError
-      }
-
-      // 5. Create a record in the resumes table
-      const { data: resumeData, error: resumeError } = await supabase
-        .from('resumes')
-        .insert({
-          user_id: user.id,
-          filename: file.file.name,
-          file_size: file.file.size,
-          storage_path: filePath
-        })
-        .select()
-        .single()
-
-      if (resumeError) {
-        // Remove uploaded file if database insert fails
-        await supabase.storage
-          .from('resumes')
-          .remove([filePath])
-
-        throw resumeError
-      }
-
-      // 6. Connect this resume to the user's profile
-      const { error: profileError } = await supabase
-        .from('profiles')
-        .update({
-          resume_id: resumeData.id
-        })
-        .eq('id', user.id)
-
-      if (profileError) {
-        // Clean up both records if profile update fails
-        await supabase.storage
-          .from('resumes')
-          .remove([filePath])
-
-        await supabase
-          .from('resumes')
-          .delete()
-          .eq('id', resumeData.id)
-
-        throw profileError
-      }
-
-      // 7. Everything succeeded
       setIsGenerating(false)
       setGenerated(true)
 
-      // 8. Continue to dashboard
+      // 3. Continue to dashboard
       setTimeout(() => {
         navigate('/dashboard', {
           state: {
             fullName: formData.fullName,
             targetPosition: formData.targetPosition,
-            industry: formData.industry
+            industry: formData.industry,
+            resumeText: parsedResumeText
           }
         })
       }, 1200)
 
     } catch (error) {
       console.error('Error saving interview profile:', error)
-
       setIsGenerating(false)
-
       alert(`Failed to save your profile: ${error.message}`)
     }
   }
