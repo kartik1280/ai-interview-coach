@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback } from 'react'
+import React, { useState, useMemo, useCallback, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { ArrowLeft, Wifi, WifiOff, Volume2, Mic, Brain, AlertCircle, Play, Clock, Sparkles, StopCircle, FileText, UploadCloud, CheckCircle2 } from 'lucide-react'
@@ -25,16 +25,23 @@ export default function BehavioralRound() {
   const targetPosition = locationState.targetPosition || localStorage.getItem('target_position') || 'Software Developer'
   const industry = locationState.industry || localStorage.getItem('industry') || 'Tech'
 
-  const initialResumeText = locationState.resumeText || localStorage.getItem('interview_resume_text') || ''
-  
-  const [resumeText, setResumeText] = useState(initialResumeText)
+  const [resumeText, setResumeText] = useState('')
   const [resumeFile, setResumeFile] = useState(null)
   const [isUploading, setIsUploading] = useState(false)
-  const [resumeParsed, setResumeParsed] = useState(!!initialResumeText)
+  const [resumeParsed, setResumeParsed] = useState(false)
 
   const [hasStarted, setHasStarted] = useState(false)
   const [isEvaluating, setIsEvaluating] = useState(false)
   const [evalProgress, setEvalProgress] = useState('Submitting transcript to AI evaluator...')
+
+  // Force a fresh resume upload state every time the Behavioral Round mounts
+  useEffect(() => {
+    setResumeParsed(false)
+    setResumeText('')
+    setResumeFile(null)
+    localStorage.removeItem('interview_resume_text')
+    localStorage.removeItem('resumeParsed')
+  }, [])
 
   // Handler for uploading resume directly on the Behavioral Round page
   const handleFileUpload = async (e) => {
