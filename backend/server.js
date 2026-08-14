@@ -128,7 +128,9 @@ Instructions:
 };
 
 // ── Multi-Provider Humanized TTS Generator ──
-const generateTTSAudioBuffer = async (text) => {
+const generateTTSAudioBuffer = async (text, signal = null) => {
+  if (signal?.aborted) return null;
+
   // Provider 1: ElevenLabs API (if key provided)
   if (ELEVENLABS_API_KEY) {
     try {
@@ -149,20 +151,27 @@ const generateTTSAudioBuffer = async (text) => {
             style: 0.2,
             use_speaker_boost: true
           }
-        })
+        }),
+        signal
       });
-      if (response.ok) {
+      if (response.ok && !signal?.aborted) {
         const arrayBuffer = await response.arrayBuffer();
         const buffer = Buffer.from(arrayBuffer);
         console.log(`[ElevenLabs TTS] ✅ Success! Generated ${buffer.length} bytes MP3 audio buffer.`);
-        return buffer;
+        return signal?.aborted ? null : buffer;
       }
       const errBody = await response.text();
       console.warn(`[ElevenLabs Error] HTTP status: ${response.status} - ${errBody}`);
     } catch (err) {
+      if (err.name === 'AbortError' || signal?.aborted) {
+        console.log('[ElevenLabs TTS] Aborted TTS generation request.');
+        return null;
+      }
       console.error('[ElevenLabs Exception]', err.message);
     }
   }
+
+  if (signal?.aborted) return null;
 
   // Provider 2: OpenAI TTS (if key provided)
   if (OPENAI_API_KEY) {
@@ -178,16 +187,20 @@ const generateTTSAudioBuffer = async (text) => {
           model: 'tts-1',
           input: text,
           voice: 'alloy'
-        })
+        }),
+        signal
       });
-      if (response.ok) {
+      if (response.ok && !signal?.aborted) {
         const arrayBuffer = await response.arrayBuffer();
-        return Buffer.from(arrayBuffer);
+        return signal?.aborted ? null : Buffer.from(arrayBuffer);
       }
     } catch (err) {
+      if (err.name === 'AbortError' || signal?.aborted) return null;
       console.error('[OpenAI TTS Error]', err.message);
     }
   }
+
+  if (signal?.aborted) return null;
 
   // Provider 3: High-Quality Edge Neural TTS Fallback (Zero cost out-of-the-box)
   console.log('[Edge TTS] Generating Neural Voice output...');
@@ -200,10 +213,15 @@ const generateTTSAudioBuffer = async (text) => {
   const tempFile = path.join(os.tmpdir(), `tts_${Date.now()}_${Math.random().toString(36).substring(7)}.mp3`);
   await tts.ttsPromise(text, tempFile);
 
+  if (signal?.aborted) {
+    try { if (fs.existsSync(tempFile)) fs.unlinkSync(tempFile); } catch (e) {}
+    return null;
+  }
+
   if (fs.existsSync(tempFile)) {
     const audioBuffer = fs.readFileSync(tempFile);
     try { fs.unlinkSync(tempFile); } catch (e) {}
-    return audioBuffer;
+    return signal?.aborted ? null : audioBuffer;
   }
 
   throw new Error('Failed to generate TTS audio buffer');
@@ -374,6 +392,7 @@ wss.on('connection', (ws) => {
   console.log('⚡ Client connected to real-time voice socket');
 
   let abortController = null;
+  let isInterrupted = false;
   let history = [];
   let candidateName = 'Manik';
   let resumeCandidateName = '';
@@ -392,6 +411,7 @@ wss.on('connection', (ws) => {
       abortController = null;
     }
 
+    isInterrupted = false;
     const currentController = new AbortController();
     abortController = currentController;
     const { signal } = currentController;
@@ -421,26 +441,28 @@ wss.on('connection', (ws) => {
       let accumulatedText = '';
 
       for await (const chunk of stream) {
-        if (signal.aborted || ws.readyState !== WebSocket.OPEN) break;
+        if (signal.aborted || isInterrupted || ws.readyState !== WebSocket.OPEN) break;
 
         const content = chunk.choices[0]?.delta?.content || '';
         if (!content) continue;
 
         accumulatedText += content;
 
-        ws.send(JSON.stringify({
-          type: 'text_chunk',
-          content,
-          fullText: accumulatedText
-        }));
+        if (!signal.aborted && !isInterrupted && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({
+            type: 'text_chunk',
+            content,
+            fullText: accumulatedText
+          }));
+        }
       }
 
       const finalAiText = accumulatedText.trim();
-      if (finalAiText && !signal.aborted) {
+      if (finalAiText && !signal.aborted && !isInterrupted) {
         console.log('[AI Output Stream Completed]:', finalAiText);
         history.push({ role: 'assistant', content: finalAiText });
 
-        if (ws.readyState === WebSocket.OPEN) {
+        if (ws.readyState === WebSocket.OPEN && !signal.aborted && !isInterrupted) {
           ws.send(JSON.stringify({
             type: 'text',
             content: finalAiText,
@@ -449,11 +471,11 @@ wss.on('connection', (ws) => {
         }
 
         // Generate Audio Buffer using multi-provider TTS
-        if (!signal.aborted) {
+        if (!signal.aborted && !isInterrupted) {
           try {
-            const audioBuffer = await generateTTSAudioBuffer(finalAiText);
+            const audioBuffer = await generateTTSAudioBuffer(finalAiText, signal);
 
-            if (!signal.aborted && ws.readyState === WebSocket.OPEN && audioBuffer) {
+            if (!signal.aborted && !isInterrupted && ws.readyState === WebSocket.OPEN && audioBuffer) {
               const base64Audio = audioBuffer.toString('base64');
               console.log('[TTS Audio] Base64 audio block sent to client.');
               ws.send(JSON.stringify({
@@ -468,7 +490,7 @@ wss.on('connection', (ws) => {
         }
       }
     } catch (err) {
-      if (err.name === 'AbortError') {
+      if (err.name === 'AbortError' || signal.aborted || isInterrupted) {
         console.log('⚡ Turn generation aborted successfully.');
       } else {
         console.error('[Turn Generation Error]', err.message);
@@ -495,6 +517,7 @@ wss.on('connection', (ws) => {
 
       if (data.type === 'interrupt' || data.type === 'speech_started') {
         console.log('⚡ [Interrupt] Client barge-in received. Aborting active turn...');
+        isInterrupted = true;
         if (abortController) {
           abortController.abort();
           abortController = null;

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
+import { MicVAD } from '@ricky0123/vad-web';
 
 const WS_URL = 'ws://localhost:5050';
 
@@ -35,6 +36,7 @@ export function useInterviewSocket(resumeText = '', candidateName = 'Manik', res
   const pingIntervalRef = useRef(null);
   const streamRef = useRef(null);
   const vadIntervalRef = useRef(null);
+  const vadInstanceRef = useRef(null);
   const silenceTimerRef = useRef(null);
   const hasReceivedAudioRef = useRef(false);
 
@@ -93,32 +95,20 @@ export function useInterviewSocket(resumeText = '', candidateName = 'Manik', res
     }
   }, []);
 
-  // ── Smooth 300ms Fade-Out Barge-In ──
+  // ── Instant Audio Killswitch Barge-In ──
   const stopAudio = useCallback(() => {
     audioQueueRef.current = [];
 
     if (audioRef.current) {
       try {
-        console.log('🔇 [Smooth Barge-In] Fading out AI audio over 300ms');
-        let volume = audioRef.current.volume || 1.0;
-        const currentAudio = audioRef.current;
-        audioRef.current = null;
-
-        const fadeInterval = setInterval(() => {
-          if (volume > 0.15) {
-            volume -= 0.15;
-            try { currentAudio.volume = Math.max(0, volume); } catch (e) {}
-          } else {
-            clearInterval(fadeInterval);
-            try {
-              currentAudio.pause();
-              currentAudio.currentTime = 0;
-            } catch (e) {}
-          }
-        }, 30);
+        console.log('🔇 [Instant Killswitch] Nuking AI audio player and clearing decoder buffer');
+        audioRef.current.pause();
+        audioRef.current.removeAttribute('src');
+        audioRef.current.load();
       } catch (e) {
         // ignore
       }
+      audioRef.current = null;
     }
 
     if ('speechSynthesis' in window) {
@@ -346,48 +336,73 @@ export function useInterviewSocket(resumeText = '', candidateName = 'Manik', res
     }
   }, [playInstantFiller, addTranscriptEntry]);
 
-  // ── VAD Volume Calculation ──
-  const setupVAD = useCallback((stream) => {
+  // ── Silero Neural VAD + RMS Fallback ──
+  const setupVAD = useCallback(async (stream) => {
     try {
-      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-      const audioContext = new AudioContextClass();
-      const source = audioContext.createMediaStreamSource(stream);
-      const analyser = audioContext.createAnalyser();
-      analyser.fftSize = 512;
-      analyser.smoothingTimeConstant = 0.8;
-      source.connect(analyser);
-
-      const dataArray = new Uint8Array(analyser.frequencyBinCount);
-      const RMS_THRESHOLD = 35; // Increased threshold for noise rejection
-
-      vadIntervalRef.current = setInterval(() => {
-        if (!mountedRef.current) return;
-
-        analyser.getByteFrequencyData(dataArray);
-
-        let sum = 0;
-        for (let i = 0; i < dataArray.length; i++) {
-          sum += dataArray[i] * dataArray[i];
-        }
-        const rms = Math.sqrt(sum / dataArray.length);
-
-        if (rms > RMS_THRESHOLD) {
-          if (!isUserSpeakingRef.current) {
-            isUserSpeakingRef.current = true;
-            console.log('🗣️ User VAD activity detected, RMS:', Math.round(rms));
-
-            if (isAiSpeakingRef.current && transcriptBufferRef.current.trim().length >= 3) {
-              sendInterrupt();
-            }
-
-            setStatus('listening');
+      console.log('🧠 Initializing Silero Neural VAD (@ricky0123/vad-web)...');
+      const myVad = await MicVAD.new({
+        onSpeechStart: () => {
+          console.log('🗣️ [Silero Neural VAD] User speech start detected!');
+          isUserSpeakingRef.current = true;
+          if (isAiSpeakingRef.current) {
+            console.log('⚡ [Barge-In] Interrupting AI playback instantly on speech start');
+            sendInterrupt();
           }
-        } else {
+          setStatus('listening');
+        },
+        onSpeechEnd: () => {
+          console.log('🗣️ [Silero Neural VAD] User speech end detected');
           isUserSpeakingRef.current = false;
+        },
+        onVADFrameLoaded: () => {
+          console.log('🎙️ [Silero Neural VAD] Model loaded & active');
         }
-      }, 100);
+      });
+      vadInstanceRef.current = myVad;
+      myVad.start();
     } catch (err) {
-      console.warn('VAD setup error:', err);
+      console.warn('Silero VAD initialization notice, using audio analyzer fallback:', err.message);
+      try {
+        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+        const audioContext = new AudioContextClass();
+        const source = audioContext.createMediaStreamSource(stream);
+        const analyser = audioContext.createAnalyser();
+        analyser.fftSize = 512;
+        analyser.smoothingTimeConstant = 0.8;
+        source.connect(analyser);
+
+        const dataArray = new Uint8Array(analyser.frequencyBinCount);
+        const RMS_THRESHOLD = 35;
+
+        vadIntervalRef.current = setInterval(() => {
+          if (!mountedRef.current) return;
+
+          analyser.getByteFrequencyData(dataArray);
+
+          let sum = 0;
+          for (let i = 0; i < dataArray.length; i++) {
+            sum += dataArray[i] * dataArray[i];
+          }
+          const rms = Math.sqrt(sum / dataArray.length);
+
+          if (rms > RMS_THRESHOLD) {
+            if (!isUserSpeakingRef.current) {
+              isUserSpeakingRef.current = true;
+              console.log('🗣️ User VAD activity detected, RMS:', Math.round(rms));
+
+              if (isAiSpeakingRef.current) {
+                sendInterrupt();
+              }
+
+              setStatus('listening');
+            }
+          } else {
+            isUserSpeakingRef.current = false;
+          }
+        }, 100);
+      } catch (e) {
+        console.warn('VAD setup error:', e);
+      }
     }
   }, [sendInterrupt]);
 
@@ -660,6 +675,10 @@ export function useInterviewSocket(resumeText = '', candidateName = 'Manik', res
       isRecordingRef.current = false;
 
       if (vadIntervalRef.current) clearInterval(vadIntervalRef.current);
+      if (vadInstanceRef.current) {
+        try { vadInstanceRef.current.destroy(); } catch (e) {}
+        vadInstanceRef.current = null;
+      }
       if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
       if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
       if (pingIntervalRef.current) clearInterval(pingIntervalRef.current);
@@ -691,6 +710,10 @@ export function useInterviewSocket(resumeText = '', candidateName = 'Manik', res
     stopAudio();
 
     if (vadIntervalRef.current) clearInterval(vadIntervalRef.current);
+    if (vadInstanceRef.current) {
+      try { vadInstanceRef.current.destroy(); } catch (e) {}
+      vadInstanceRef.current = null;
+    }
     if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
     if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
     if (pingIntervalRef.current) clearInterval(pingIntervalRef.current);
