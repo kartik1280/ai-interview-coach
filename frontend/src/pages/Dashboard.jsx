@@ -1,13 +1,14 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { Flame, ChevronRight, Sparkles, X, Sliders, LayoutDashboard, CheckCircle2, Play } from 'lucide-react'
-
+import { supabase } from '../lib/supabase'
 
 // Helper for score tier colors
 const getScoreColor = (score) => {
-  if (score >= 8.5) return '#2F8F6E' // Green
-  if (score >= 7.0) return '#B8862E' // Amber
+  const num = parseFloat(score)
+  if (num >= 8.5) return '#2F8F6E' // Green
+  if (num >= 7.0) return '#B8862E' // Amber
   return '#C0533F' // Red / Coral
 }
 
@@ -15,65 +16,25 @@ export default function Dashboard() {
   const navigate = useNavigate()
   const location = useLocation()
 
-  // Get user details from location state or default to Sameer Mishra
-  const userProfile = location.state || {
-    fullName: 'Sameer Mishra',
-    targetPosition: 'Software Development Engineer',
-    industry: 'Google'
-  }
+  const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState(null)
 
-  const initialLetter = (userProfile.fullName || 'S').charAt(0).toUpperCase()
+  // Get user details (initially falls back to local routing details, then loads backend data)
+  const [userProfile, setUserProfile] = useState(location.state || {
+    fullName: 'Loading...',
+    targetPosition: '',
+    industry: ''
+  })
 
   // State for practice rounds
-  const [rounds, setRounds] = useState([
-    {
-      id: 'technical',
-      name: 'Technical round',
-      subtitle: 'Data structures and algorithms',
-      score: 8.2,
-      feedback: [
-        'Solid implementation of graph traversal algorithms.',
-        'Slower on space complexity analysis for recursive edge cases.'
-      ]
-    },
-    {
-      id: 'behavioral',
-      name: 'Behavioral round',
-      subtitle: 'Teamwork and leadership',
-      score: 9.1,
-      feedback: [
-        'Excellent use of STAR method for conflict resolution stories.',
-        'Clear quantification of project impact and metrics.'
-      ]
-    },
-    {
-      id: 'aptitude',
-      name: 'Aptitude round',
-      subtitle: 'Career awareness and reasoning',
-      score: 7.8,
-      feedback: [
-        'Solid on logical reasoning; slower on quantitative estimation questions.',
-        'Suggested focus: timed practice on estimation-style problems.'
-      ]
-    }
-  ])
-
-  // State for history list
-  const [history, setHistory] = useState([
-    { id: 1, name: 'Behavioral round', daysAgo: '2 days ago', score: 9.1 },
-    { id: 2, name: 'Technical round', daysAgo: '4 days ago', score: 8.2 },
-    { id: 3, name: 'Aptitude round', daysAgo: '6 days ago', score: 7.8 },
-    { id: 4, name: 'Technical round', daysAgo: '9 days ago', score: 7.4 }
-  ])
+  const [rounds, setRounds] = useState([])
+  const [history, setHistory] = useState([])
+  const [streak, setStreak] = useState(0)
+  const [avgReadiness, setAvgReadiness] = useState('0.0')
+  const [areasToImprove, setAreasToImprove] = useState('')
 
   // State for accordion (only 1 expanded at a time)
-  const [expandedRoundId, setExpandedRoundId] = useState('aptitude')
-
-  // Calculate dynamic stats
-  const totalRoundsCount = history.length
-  const avgReadiness = (
-    rounds.reduce((acc, curr) => acc + curr.score, 0) / rounds.length
-  ).toFixed(1)
+  const [expandedRoundId, setExpandedRoundId] = useState(null)
 
   // Practice round modal state
   const [isModalOpen, setIsModalOpen] = useState(false)
@@ -81,18 +42,110 @@ export default function Dashboard() {
   const [isSimulating, setIsSimulating] = useState(false)
   const [simStep, setSimStep] = useState('Running your round...')
 
+  useEffect(() => {
+    const fetchDashboardData = async () => {
+      try {
+        const { data: { session }, error: sessionError } = await supabase.auth.getSession()
+        if (sessionError || !session) {
+          throw new Error('No active user session. Please log in.')
+        }
+
+        const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/dashboard`, {
+          headers: {
+            'Authorization': `Bearer ${session.access_token}`
+          }
+        })
+
+        if (!response.ok) {
+          const errData = await response.json()
+          if (response.status === 400 && errData.detail === "Please complete profile onboarding first") {
+            navigate('/create-interview')
+            return
+          }
+          throw new Error(errData.detail || 'Failed to fetch dashboard data')
+        }
+
+        const data = await response.json()
+        setUserProfile({
+          fullName: data.fullName,
+          targetPosition: data.targetPosition,
+          industry: data.industry
+        })
+        setRounds(data.rounds)
+        setHistory(data.recentHistory)
+        setStreak(data.streak)
+        setAvgReadiness(data.avgReadiness.toFixed(1))
+        setAreasToImprove(data.areasToImprove)
+        
+        if (data.rounds && data.rounds.length > 0) {
+          setExpandedRoundId(data.rounds[0].id)
+        }
+      } catch (err) {
+        console.error('Error loading dashboard:', err)
+        setError(err.message)
+      } finally {
+        setIsLoading(false)
+      }
+    }
+
+    fetchDashboardData()
+  }, [])
+
+  const initialLetter = (userProfile.fullName || 'S').charAt(0).toUpperCase()
+
+  // Calculate dynamic stats
+  const totalRoundsCount = history.length
+
   const handleStartPracticeRound = () => {
     setIsModalOpen(true)
   }
 
-  const handleRunSimulatedRound = () => {
+  const handleRunSimulatedRound = async () => {
     setIsModalOpen(false)
-    if (selectedRoundType === 'behavioral') {
-      navigate('/behavioral-round')
-    } else if (selectedRoundType === 'aptitude') {
-      navigate('/aptitude-round')
-    } else {
-      navigate('/technical-round')
+    setIsSimulating(true)
+    setSimStep('Initializing your session on backend...')
+    
+    try {
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession()
+      if (sessionError || !session) {
+        throw new Error('No active user session. Please log in.')
+      }
+      
+      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/round/start`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          roundType: selectedRoundType
+        })
+      })
+      
+      if (!response.ok) {
+        const errData = await response.json()
+        throw new Error(errData.detail || 'Failed to start practice round')
+      }
+      
+      const data = await response.json()
+      
+      const routeMap = {
+        technical: '/technical-round',
+        behavioral: '/behavioral-round',
+        aptitude: '/aptitude-round'
+      }
+      
+      navigate(routeMap[selectedRoundType] || '/technical-round', {
+        state: {
+          roundId: data.roundId,
+          questions: data.questions
+        }
+      })
+    } catch (err) {
+      console.error('Error starting round:', err)
+      alert(`Failed to start round: ${err.message}`)
+    } finally {
+      setIsSimulating(false)
     }
   }
 
@@ -187,7 +240,7 @@ export default function Dashboard() {
               <Flame className="w-4 h-4 text-amber-600 fill-amber-500" />
               <div className="flex flex-col items-start leading-none">
                 <span className="font-radio font-extrabold text-base text-amber-900">
-                  12
+                  {streak}
                 </span>
                 <span className="font-fragment text-[9px] font-bold text-amber-700 uppercase tracking-wider">
                   DAY STREAK
@@ -338,7 +391,7 @@ export default function Dashboard() {
             </div>
 
             <p className="font-radio text-xs text-stone-700 leading-relaxed">
-              <strong className="text-black font-bold">Communication:</strong> explain reasoning aloud, not just the final answer <span className="text-stone-400 px-1">|</span> <strong className="text-black font-bold">Technical depth:</strong> system design fundamentals <span className="text-stone-400 px-1">|</span> <strong className="text-black font-bold">Pacing:</strong> quantitative reasoning under time pressure
+              {areasToImprove || "No completed rounds yet. Finish some practice sessions to view recommendations."}
             </p>
           </section>
         </motion.div>

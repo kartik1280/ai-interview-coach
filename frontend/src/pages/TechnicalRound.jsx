@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router-dom'
 import Editor from '@monaco-editor/react'
 import { ArrowLeft, Play, Pause, RotateCcw, CheckCircle2, ThumbsUp, ThumbsDown, MessageSquare, Moon, Sun, Timer, AlertCircle, Plus } from 'lucide-react'
+import { supabase } from '../lib/supabase'
 
 const PROBLEMS = [
   {
@@ -176,18 +177,69 @@ int main() {
 
 export default function TechnicalRound() {
   const navigate = useNavigate()
-  const [selectedProblem, setSelectedProblem] = useState(PROBLEMS[0])
+  const location = useLocation()
+
+  // Retrieve passed round details
+  const roundState = location.state || {}
+  const roundId = roundState.roundId
+  const backendQuestions = roundState.questions || []
+
+  // Map backend questions to PROBLEM shapes
+  const mappedProblems = backendQuestions.map((bq) => {
+    const rawDiff = (bq.difficulty || 'medium').toLowerCase()
+    let timeLimitSec = bq.timeLimitSeconds
+    if (!timeLimitSec) {
+      if (rawDiff === 'easy') timeLimitSec = 600
+      else if (rawDiff === 'hard') timeLimitSec = 2700
+      else timeLimitSec = 1500
+    }
+
+    // Parse title & description
+    const questionText = bq.questionText || 'Technical Coding Problem'
+    const titleMatch = questionText.match(/^\[(.*?)\]\s*(.*)/)
+    const displayTitle = titleMatch ? titleMatch[2].split('\n')[0] : questionText.split('\n')[0]
+    
+    return {
+      id: bq.id,
+      questionId: bq.id,
+      title: displayTitle || 'Technical Coding Problem',
+      difficulty: rawDiff.charAt(0).toUpperCase() + rawDiff.slice(1),
+      timeLimitSeconds: timeLimitSec,
+      recommendedTimeSeconds: timeLimitSec,
+      description: questionText,
+      example: 'Refer to problem description for sample inputs.',
+      starterCodes: {
+        javascript: bq.starterCode || `// Write your solution here\nfunction solve() {\n  \n}`,
+        python: `def solve():\n    pass`,
+        java: `public class Solution {\n    public static void solve() {\n        \n    }\n}`,
+        cpp: `void solve() {\n    \n}`
+      }
+    }
+  })
+
+  const finalProblemsList = mappedProblems.length > 0 ? mappedProblems : PROBLEMS
+
+  const [selectedProblem, setSelectedProblem] = useState(finalProblemsList[0])
   const [language, setLanguage] = useState('javascript')
   const [editorTheme, setEditorTheme] = useState('vs-dark')
-  const [code, setCode] = useState(PROBLEMS[0].starterCodes.javascript)
+  const [code, setCode] = useState(finalProblemsList[0].starterCodes?.javascript || '')
   const [output, setOutput] = useState('Run your code to see logs and test results here.')
   const [isRunning, setIsRunning] = useState(false)
+  const [isSubmitting, setIsSubmitting] = useState(false)
   const [isSubmitted, setIsSubmitted] = useState(false)
+  const [evalScore, setEvalScore] = useState(null)
+  const [evalFeedback, setEvalFeedback] = useState('')
 
   // Timer State
-  const [timeLeft, setTimeLeft] = useState(PROBLEMS[0].recommendedTimeSeconds)
+  const [timeLeft, setTimeLeft] = useState(finalProblemsList[0].timeLimitSeconds || finalProblemsList[0].recommendedTimeSeconds)
   const [isTimerActive, setIsTimerActive] = useState(true)
   const [showTimeUpModal, setShowTimeUpModal] = useState(false)
+
+  // Automatic submit on timeout
+  const handleTimeoutAutoSubmit = () => {
+    if (isSubmitting) return
+    handleSubmitSolution()
+  }
 
   // Timer Countdown Effect
   useEffect(() => {
@@ -199,6 +251,7 @@ export default function TechnicalRound() {
     } else if (timeLeft === 0 && isTimerActive) {
       setIsTimerActive(false)
       setShowTimeUpModal(true)
+      handleTimeoutAutoSubmit()
     }
     return () => clearInterval(interval)
   }, [isTimerActive, timeLeft])
@@ -277,9 +330,49 @@ export default function TechnicalRound() {
     }, 500)
   }
 
-  const handleSubmitSolution = () => {
-    setIsSubmitted(true)
-    setIsTimerActive(false)
+  const handleSubmitSolution = async () => {
+    if (isSubmitting) return
+    setIsSubmitting(true)
+    setIsSubmitted(false)
+    setIsRunning(true)
+    setOutput('Submitting your solution and evaluating...')
+    
+    try {
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession()
+      if (sessionError || !session) {
+        throw new Error('No active user session found. Please log in.')
+      }
+      
+      const qId = selectedProblem.questionId || selectedProblem.id
+      const res = await fetch(`${import.meta.env.VITE_API_BASE_URL}/round/${roundId}/answer?question_id=${qId}`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          answerText: code || "// No answer submitted (Timeout)"
+        })
+      })
+      
+      if (!res.ok) {
+        const errData = await res.json()
+        throw new Error(errData.detail || 'Failed to submit solution')
+      }
+      
+      const data = await res.json()
+      setEvalScore(data.score)
+      setEvalFeedback(data.feedback)
+      setIsSubmitted(true)
+      setIsTimerActive(false)
+      setOutput(`✓ Submission evaluated.\n\nScore: ${data.score}/10\nFeedback: ${data.feedback}`)
+    } catch (err) {
+      console.error('Error submitting answer:', err)
+      alert(`Submission failed: ${err.message}`)
+    } finally {
+      setIsRunning(false)
+      setIsSubmitting(false)
+    }
   }
 
   return (
@@ -391,7 +484,7 @@ export default function TechnicalRound() {
 
         {/* Problem Selector Tabs */}
         <div className="flex items-center gap-2 border-b border-stone-300 pb-2">
-          {PROBLEMS.map((prob) => (
+          {finalProblemsList.map((prob) => (
             <button
               key={prob.id}
               onClick={() => handleSelectProblem(prob)}
@@ -496,7 +589,7 @@ export default function TechnicalRound() {
                 <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
                 <div>
                   <p>Solution Submitted Successfully!</p>
-                  <p className="text-[11px] font-normal text-emerald-800">Time Taken: {formatTimer(selectedProblem.recommendedTimeSeconds - timeLeft)} · Score: 9.4/10</p>
+                  <p className="text-[11px] font-normal text-emerald-800">Time Taken: {formatTimer(selectedProblem.recommendedTimeSeconds - timeLeft)} · Score: {evalScore}/10</p>
                 </div>
               </motion.div>
             )}

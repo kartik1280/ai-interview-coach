@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router-dom'
 import { ArrowLeft, Timer, CheckCircle2, HelpCircle, Pause, Play, RotateCcw, AlertCircle, Plus, ThumbsUp, ThumbsDown, MessageSquare } from 'lucide-react'
+import { supabase } from '../lib/supabase'
 
 const APTITUDE_QUESTIONS = [
   {
@@ -50,18 +51,63 @@ const APTITUDE_QUESTIONS = [
 
 export default function AptitudeRound() {
   const navigate = useNavigate()
+  const location = useLocation()
+
+  // Retrieve passed round details
+  const roundState = location.state || {}
+  const roundId = roundState.roundId
+  const backendQuestions = roundState.questions || []
+
+  // Map backend questions to PROBLEM shapes
+  const mappedQuestions = backendQuestions.map((bq) => {
+    // Parse Options: A) ... | B) ... | C) ... | D) ...
+    let questionTitle = bq.questionText || ''
+    let options = ['A) Option A', 'B) Option B', 'C) Option C', 'D) Option D']
+    
+    if (questionTitle.includes(' Options: ')) {
+      const parts = questionTitle.split(' Options: ')
+      questionTitle = parts[0]
+      const optStr = parts[1]
+      if (optStr.includes(' | ')) {
+        options = optStr.split(' | ')
+      }
+    }
+    
+    return {
+      id: bq.id,
+      questionId: bq.id,
+      category: 'APTITUDE',
+      title: questionTitle,
+      description: 'Select the correct choice from the options below.',
+      options: options,
+      correctOption: 1, // fallback
+      explanation: 'See performance report for detailed category analysis.'
+    }
+  })
+
+  const finalQuestionsList = mappedQuestions.length > 0 ? mappedQuestions : APTITUDE_QUESTIONS
+
   const [currentIdx, setCurrentIdx] = useState(0)
   const [selectedOption, setSelectedOption] = useState(null)
   const [showExplanation, setShowExplanation] = useState(false)
   const [scratchpad, setScratchpad] = useState('')
+  const [isSubmitting, setIsSubmitting] = useState(false)
   const [isSubmitted, setIsSubmitted] = useState(false)
+  const [evalScore, setEvalScore] = useState(null)
+  const [evalFeedback, setEvalFeedback] = useState('')
 
-  // 15 Minutes Timer State (900 seconds)
+  // 15 Minutes Total Timer State (900 seconds)
   const [timeLeft, setTimeLeft] = useState(900)
   const [isTimerActive, setIsTimerActive] = useState(true)
   const [showTimeUpModal, setShowTimeUpModal] = useState(false)
 
-  const currentQ = APTITUDE_QUESTIONS[currentIdx]
+  const currentQ = finalQuestionsList[currentIdx]
+
+  // Handle timeout auto-submit
+  const handleTimeoutAutoSubmit = () => {
+    if (isSubmitting) return
+    handleSubmitAssessment(true)
+  }
 
   // Timer Effect with Auto-Submit on Expiry
   useEffect(() => {
@@ -72,9 +118,8 @@ export default function AptitudeRound() {
       }, 1000)
     } else if (timeLeft === 0 && isTimerActive) {
       setIsTimerActive(false)
-      setIsSubmitted(true)
-      setShowExplanation(true)
       setShowTimeUpModal(true)
+      handleTimeoutAutoSubmit()
     }
     return () => clearInterval(interval)
   }, [isTimerActive, timeLeft])
@@ -93,15 +138,55 @@ export default function AptitudeRound() {
   }
 
   const handleNextQuestion = () => {
-    setCurrentIdx((prev) => (prev + 1) % APTITUDE_QUESTIONS.length)
+    setCurrentIdx((prev) => (prev + 1) % finalQuestionsList.length)
     setSelectedOption(null)
     setShowExplanation(false)
   }
 
-  const handleSubmitAssessment = () => {
-    setIsSubmitted(true)
-    setIsTimerActive(false)
-    setShowExplanation(true)
+  const handleSubmitAssessment = async (isTimeout = false) => {
+    if (isSubmitting) return
+    if (!isTimeout && selectedOption === null) {
+      alert("Please select an option before submitting.")
+      return
+    }
+
+    setIsSubmitting(true)
+    try {
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession()
+      if (sessionError || !session) {
+        throw new Error('No active user session. Please log in.')
+      }
+
+      const letter = selectedOption !== null ? ['A', 'B', 'C', 'D'][selectedOption] : 'A'
+      const qId = currentQ.questionId || currentQ.id
+      const res = await fetch(`${import.meta.env.VITE_API_BASE_URL}/round/${roundId}/answer?question_id=${qId}`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          answerText: letter
+        })
+      })
+
+      if (!res.ok) {
+        const errData = await res.json()
+        throw new Error(errData.detail || 'Failed to submit answer')
+      }
+
+      const data = await res.json()
+      setEvalScore(data.score)
+      setEvalFeedback(data.feedback)
+      setIsSubmitted(true)
+      setIsTimerActive(false)
+      setShowExplanation(true)
+    } catch (err) {
+      console.error('Error submitting answer:', err)
+      if (!isTimeout) alert(`Submission failed: ${err.message}`)
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   return (
@@ -175,7 +260,7 @@ export default function AptitudeRound() {
 
             {/* Question Numbers Tabs */}
             <div className="flex items-center gap-1.5 ml-2">
-              {APTITUDE_QUESTIONS.map((q, idx) => (
+              {finalQuestionsList.map((q, idx) => (
                 <button
                   key={q.id}
                   onClick={() => {
@@ -287,8 +372,7 @@ export default function AptitudeRound() {
               >
                 <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
                 <div>
-                  <p>Assessment Answers Submitted!</p>
-                  <p className="text-[11px] font-normal text-emerald-800">Time Taken: {formatTime(900 - timeLeft)} · Score: 8.8/10</p>
+                  <p className="text-[11px] font-normal text-emerald-800">Time Taken: {formatTime(900 - timeLeft)} · Score: {evalScore}/10</p>
                 </div>
               </motion.div>
             )}
@@ -305,9 +389,14 @@ export default function AptitudeRound() {
                   <span className="font-fragment text-[10px] font-bold text-[#2F8F6E] uppercase tracking-wider block mb-1">
                     AI LOGICAL BREAKDOWN
                   </span>
-                  <p className="font-radio text-xs text-stone-700 leading-relaxed">
+                  <p className="font-radio text-xs text-stone-700 leading-relaxed mb-3">
                     {currentQ.explanation}
                   </p>
+                  {evalFeedback && (
+                    <p className="font-radio text-xs text-stone-600 border-t pt-2 border-stone-100 leading-relaxed">
+                      <strong>AI Evaluation Feedback:</strong> {evalFeedback}
+                    </p>
+                  )}
                 </motion.div>
               )}
             </AnimatePresence>

@@ -1,15 +1,17 @@
-import React, { useRef, useState } from 'react'
+import React, { useRef, useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { ArrowLeft, Download, Award, AlertTriangle, CheckCircle2, LayoutDashboard, Sliders, Sparkles } from 'lucide-react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts'
 import html2canvas from 'html2canvas'
 import { jsPDF } from 'jspdf'
+import { supabase } from '../lib/supabase'
 
 // Score tier colors matching app rules
 const getScoreColor = (score) => {
-  if (score >= 8.5) return '#2F8F6E' // Green
-  if (score >= 7.0) return '#B8862E' // Amber
+  const num = parseFloat(score)
+  if (num >= 8.5) return '#2F8F6E' // Green
+  if (num >= 7.0) return '#B8862E' // Amber
   return '#C0533F' // Red / Coral
 }
 
@@ -17,85 +19,66 @@ export default function FullReport() {
   const navigate = useNavigate()
   const location = useLocation()
   const reportRef = useRef(null)
+  
+  const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState(null)
   const [isExporting, setIsExporting] = useState(false)
 
-  // Data passed from dashboard state or fallback mock data
-  const dataState = location.state || {}
-  
-  const userProfile = dataState.userProfile || {
-    fullName: 'Sameer Mishra',
-    targetPosition: 'Software Development Engineer',
-    industry: 'Google'
-  }
+  // Onboarding profile
+  const [userProfile, setUserProfile] = useState({
+    fullName: 'Loading...',
+    targetPosition: '',
+    industry: ''
+  })
 
-  const rounds = dataState.rounds || [
-    {
-      id: 'technical',
-      name: 'Technical round',
-      subtitle: 'Data structures and algorithms',
-      score: 8.2,
-      feedback: [
-        'Solid implementation of graph traversal algorithms.',
-        'Slower on space complexity analysis for recursive edge cases.'
-      ],
-      bestQuestion: {
-        title: 'Binary Tree Level Order Traversal',
-        score: 8.8,
-        feedback: 'Clean BFS queue logic with optimal O(N) time complexity.'
-      },
-      worstQuestion: {
-        title: 'LRU Cache Design & Lock Contention',
-        score: 7.4,
-        feedback: 'Doubly linked list logic was good, but missed concurrency safeguards for thread safety.'
-      }
-    },
-    {
-      id: 'behavioral',
-      name: 'Behavioral round',
-      subtitle: 'Teamwork and leadership',
-      score: 9.1,
-      feedback: [
-        'Excellent use of STAR method for conflict resolution stories.',
-        'Clear quantification of project impact and metrics.'
-      ],
-      starBreakdown: {
-        situation: 9.2,
-        task: 8.8,
-        action: 9.4,
-        result: 9.0
-      },
-      bestQuestion: {
-        title: 'Navigating Cross-Functional Stakeholder Conflicts',
-        score: 9.5,
-        feedback: 'Outstanding STAR delivery. Demonstrated high empathy, data-driven alignment, and clear metrics.'
-      },
-      worstQuestion: {
-        title: 'Handling Unexpected Production Outages under Deadline',
-        score: 8.5,
-        feedback: 'Strong response overall, but could further detail post-mortem preventative measures.'
-      }
-    },
-    {
-      id: 'aptitude',
-      name: 'Aptitude round',
-      subtitle: 'Career awareness and reasoning',
-      score: 7.8,
-      feedback: [
-        'Solid on logical reasoning; slower on quantitative estimation questions.',
-        'Suggested focus: timed practice on estimation-style problems.'
-      ],
-      bestQuestion: {
-        title: 'Pattern Matrix Logical Deductions',
-        score: 8.4,
-        feedback: 'Accurate analytical pattern matching with strong explanation of sequence rules.'
-      },
-      worstQuestion: {
-        title: 'Market Sizing Fermi Estimation Problem',
-        score: 7.2,
-        feedback: 'Reasoning steps were sound, but estimation arithmetic took longer than expected.'
+  // State arrays populated by API
+  const [rounds, setRounds] = useState([])
+  const [history, setHistory] = useState([])
+  const [streak, setStreak] = useState(0)
+  const [overallScore, setOverallScore] = useState(0.0)
+  const [areasToImprove, setAreasToImprove] = useState('')
+
+  useEffect(() => {
+    const fetchReportData = async () => {
+      try {
+        const { data: { session }, error: sessionError } = await supabase.auth.getSession()
+        if (sessionError || !session) {
+          throw new Error('No active user session found. Please log in.')
+        }
+
+        const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/report/latest`, {
+          headers: {
+            'Authorization': `Bearer ${session.access_token}`
+          }
+        })
+
+        if (!response.ok) {
+          const errData = await response.json()
+          throw new Error(errData.detail || 'Failed to load report data')
+        }
+
+        const data = await response.json()
+        setUserProfile({
+          fullName: data.fullName,
+          targetPosition: data.targetPosition,
+          industry: data.industry
+        })
+        setRounds(data.rounds)
+        setHistory(data.recentHistory)
+        setStreak(data.streak)
+        setOverallScore(data.overallScore)
+        setAreasToImprove(data.areasToImprove)
+      } catch (err) {
+        console.error('Error fetching report:', err)
+        setError(err.message)
+      } finally {
+        setIsLoading(false)
       }
     }
-  ]
+
+    fetchReportData()
+  }, [])
+
 
   // Filter completed round types for the Recharts comparison chart
   const completedChartData = rounds.map((r) => ({
@@ -104,10 +87,6 @@ export default function FullReport() {
     fillColor: getScoreColor(r.score)
   }))
 
-  // Overall readiness average
-  const overallScore = parseFloat(
-    (rounds.reduce((acc, curr) => acc + curr.score, 0) / rounds.length).toFixed(1)
-  )
   const overallColor = getScoreColor(overallScore)
 
   // Find single best-scored answer across all completed rounds
@@ -167,6 +146,14 @@ export default function FullReport() {
     } finally {
       setIsExporting(false)
     }
+  }
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-[#FCF5E2] flex items-center justify-center font-radio">
+        <div className="text-stone-600 font-bold">Loading your report...</div>
+      </div>
+    )
   }
 
   return (
