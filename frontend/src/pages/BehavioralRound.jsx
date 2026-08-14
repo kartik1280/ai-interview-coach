@@ -26,6 +26,7 @@ export default function BehavioralRound() {
   const industry = locationState.industry || localStorage.getItem('industry') || 'Tech'
 
   const [resumeText, setResumeText] = useState('')
+  const [resumeCandidateName, setResumeCandidateName] = useState(locationState.resumeCandidateName || localStorage.getItem('resume_candidate_name') || '')
   const [resumeFile, setResumeFile] = useState(null)
   const [isUploading, setIsUploading] = useState(false)
   const [resumeParsed, setResumeParsed] = useState(false)
@@ -34,24 +35,29 @@ export default function BehavioralRound() {
   const [isEvaluating, setIsEvaluating] = useState(false)
   const [evalProgress, setEvalProgress] = useState('Submitting transcript to AI evaluator...')
 
-  // Force a fresh resume upload state every time the Behavioral Round mounts
+  // Load pre-parsed resume context if available from Create Interview or localStorage
   useEffect(() => {
-    setResumeParsed(false)
-    setResumeText('')
-    setResumeFile(null)
-    localStorage.removeItem('interview_resume_text')
-    localStorage.removeItem('resumeParsed')
+    const savedText = locationState.resumeText || localStorage.getItem('interview_resume_text') || ''
+    const savedName = locationState.resumeCandidateName || localStorage.getItem('resume_candidate_name') || ''
+    if (savedText) {
+      setResumeText(savedText)
+      setResumeCandidateName(savedName)
+      setResumeParsed(true)
+    }
   }, [])
 
+  const [isDragOver, setIsDragOver] = useState(false)
+  const [showReupload, setShowReupload] = useState(false)
+
   // Handler for uploading resume directly on the Behavioral Round page
-  const handleFileUpload = async (e) => {
-    e.preventDefault()
-    if (!resumeFile) return
+  const processResumeFile = async (fileToUpload) => {
+    const file = fileToUpload || resumeFile
+    if (!file) return
 
     setIsUploading(true)
 
     const formData = new FormData()
-    formData.append('resume', resumeFile)
+    formData.append('resume', file)
 
     try {
       const response = await fetch('http://localhost:5050/api/parse-resume', {
@@ -65,16 +71,47 @@ export default function BehavioralRound() {
 
       const data = await response.json()
       const extractedText = data.resumeText || ''
+      const extractedName = data.resumeCandidateName || ''
 
       setResumeText(extractedText)
+      setResumeCandidateName(extractedName)
       localStorage.setItem('interview_resume_text', extractedText)
+      if (extractedName) {
+        localStorage.setItem('resume_candidate_name', extractedName)
+      }
       setResumeParsed(true)
+      setShowReupload(false)
     } catch (error) {
       console.error('Error parsing resume:', error)
       alert(`Failed to parse resume: ${error.message}`)
     } finally {
       setIsUploading(false)
     }
+  }
+
+  const handleFileUpload = (e) => {
+    e.preventDefault()
+    processResumeFile()
+  }
+
+  const handleDrop = (e) => {
+    e.preventDefault()
+    setIsDragOver(false)
+    const file = e.dataTransfer.files?.[0]
+    if (file) {
+      setResumeFile(file)
+      processResumeFile(file)
+    }
+  }
+
+  const handleDragOver = (e) => {
+    e.preventDefault()
+    setIsDragOver(true)
+  }
+
+  const handleDragLeave = (e) => {
+    e.preventDefault()
+    setIsDragOver(false)
   }
 
   const {
@@ -85,7 +122,7 @@ export default function BehavioralRound() {
     fullTranscript,
     fullTranscriptRef,
     endSession
-  } = useInterviewSocket(resumeText, candidateName, hasStarted && !isEvaluating)
+  } = useInterviewSocket(resumeText, candidateName, resumeCandidateName, hasStarted && !isEvaluating)
 
   // End & Evaluate Interview Callback
   const handleTerminateAndScore = useCallback(async () => {
@@ -271,66 +308,12 @@ export default function BehavioralRound() {
 
       {/* Main Container */}
       <main className="flex-1 max-w-3xl w-full mx-auto p-4 sm:p-8 flex flex-col items-center justify-center gap-8 text-center relative">
-        {!resumeParsed ? (
-          /* STEP 1: RESUME UPLOAD UI */
+        {!hasStarted ? (
+          /* STEP 1 & 2: DYNAMIC RESUME SETUP & PRE-INTERVIEW SCREEN */
           <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="w-full max-w-md bg-[#FFFDF8] border-4 border-black rounded-3xl p-8 shadow-[8px_8px_0px_0px_#000000] flex flex-col items-center gap-6 my-auto text-center"
-          >
-            <div className="w-16 h-16 rounded-full bg-stone-100 border-2 border-black flex items-center justify-center">
-              <FileText className="w-8 h-8 text-stone-700" />
-            </div>
-
-            <div className="flex flex-col gap-2">
-              <h2 className="font-serif font-bold text-3xl text-black">
-                Upload Your Resume
-              </h2>
-              <p className="text-sm font-radio text-stone-600">
-                We'll parse your projects in memory so the AI asks highly contextual interview questions.
-              </p>
-            </div>
-
-            <form onSubmit={handleFileUpload} className="w-full flex flex-col gap-4">
-              <label className="border-2 border-dashed border-stone-400 rounded-2xl p-5 text-center bg-stone-50 hover:bg-stone-100 transition-colors cursor-pointer block">
-                <input
-                  type="file"
-                  accept=".pdf,.docx,.doc,.txt"
-                  onChange={(e) => setResumeFile(e.target.files?.[0] || null)}
-                  className="hidden"
-                  required
-                />
-                <div className="flex flex-col items-center gap-1">
-                  <UploadCloud className="w-6 h-6 text-stone-500 mb-1" />
-                  <span className="font-radio font-bold text-xs text-black">
-                    {resumeFile ? resumeFile.name : 'Select or drop PDF resume'}
-                  </span>
-                  <span className="text-[11px] text-stone-400">PDF, DOCX up to 10MB</span>
-                </div>
-              </label>
-
-              <button
-                type="submit"
-                disabled={!resumeFile || isUploading}
-                className="w-full bg-black hover:bg-stone-800 disabled:bg-stone-400 text-white font-radio font-bold text-base py-3.5 rounded-2xl transition-all cursor-pointer shadow-md flex items-center justify-center gap-2 active:scale-95"
-              >
-                {isUploading ? (
-                  <>
-                    <Sparkles className="w-4 h-4 text-amber-400 animate-spin" />
-                    <span>Extracting context...</span>
-                  </>
-                ) : (
-                  <span>Upload & Continue →</span>
-                )}
-              </button>
-            </form>
-          </motion.div>
-        ) : !hasStarted ? (
-          /* STEP 2: READY TO START UI */
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="w-full max-w-lg bg-[#FFFDF8] border-4 border-black rounded-3xl p-8 shadow-[8px_8px_0px_0px_#000000] flex flex-col items-center gap-6 my-auto"
+            className="w-full max-w-lg bg-[#FFFDF8] border-4 border-black rounded-3xl p-8 shadow-[8px_8px_0px_0px_#000000] flex flex-col items-center gap-6 my-auto text-center"
           >
             <div className="w-16 h-16 rounded-full bg-[#E2F0E0] border-2 border-black flex items-center justify-center">
               <Mic className="w-8 h-8 text-emerald-800" />
@@ -338,26 +321,111 @@ export default function BehavioralRound() {
 
             <div className="flex flex-col gap-2">
               <h2 className="font-serif font-bold text-3xl text-black tracking-tight">
-                Ready for your AI Voice Interview?
+                Behavioral Voice Interview
               </h2>
               <p className="text-sm font-radio text-stone-700 font-medium">
-                Candidate: <strong className="text-black font-bold">{candidateName}</strong> · Target: <strong className="text-black font-bold">{targetPosition}</strong>
-              </p>
-              <div className="flex items-center justify-center gap-1.5 text-xs text-emerald-700 font-bold bg-emerald-50 px-3 py-1 rounded-full border border-emerald-200 w-fit mx-auto mt-1">
-                <CheckCircle2 className="w-3.5 h-3.5" />
-                <span>Resume Context Loaded</span>
-              </div>
-              <p className="text-xs font-radio text-stone-500 max-w-sm mx-auto mt-1">
-                5-minute timed screening. The AI will ask contextual questions based on your resume projects.
+                Candidate: <strong className="text-black font-bold">{candidateName}</strong> · Position: <strong className="text-black font-bold">{targetPosition}</strong>
               </p>
             </div>
 
+            {/* Dynamic Resume Upload / Context Status Card */}
+            <div className="w-full bg-stone-50 border-2 border-stone-300 rounded-2xl p-5 flex flex-col items-center gap-3">
+              {resumeParsed && !showReupload ? (
+                /* Dynamic Success Badge with Snippet & Change Option */
+                <div className="w-full flex flex-col items-center gap-2">
+                  <div className="flex items-center justify-between w-full px-3 py-1.5 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-800 font-bold text-xs">
+                    <div className="flex items-center gap-1.5">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                      <span>Resume Context Loaded</span>
+                    </div>
+                    <button
+                      onClick={() => setShowReupload(true)}
+                      className="text-[11px] font-radio text-stone-600 hover:text-black underline cursor-pointer"
+                    >
+                      Change Resume
+                    </button>
+                  </div>
+
+                  {resumeText && (
+                    <div className="w-full bg-white border border-stone-200 rounded-xl p-3 text-left">
+                      <span className="font-fragment text-[10px] font-bold text-stone-400 uppercase tracking-widest block mb-1">
+                        PARSED CONTEXT PREVIEW
+                      </span>
+                      <p className="text-xs text-stone-600 line-clamp-2 font-mono leading-relaxed">
+                        "{resumeText.substring(0, 180)}..."
+                      </p>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                /* Drag & Drop Upload Zone */
+                <form
+                  onSubmit={handleFileUpload}
+                  onDragOver={handleDragOver}
+                  onDragLeave={handleDragLeave}
+                  onDrop={handleDrop}
+                  className="w-full flex flex-col gap-3"
+                >
+                  <label
+                    className={`border-2 border-dashed rounded-2xl p-6 text-center transition-all cursor-pointer block ${
+                      isDragOver
+                        ? 'border-emerald-600 bg-emerald-50/70 scale-102'
+                        : 'border-stone-400 bg-white hover:bg-stone-100'
+                    }`}
+                  >
+                    <input
+                      type="file"
+                      accept=".pdf,.docx,.doc,.txt"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0]
+                        if (file) {
+                          setResumeFile(file)
+                          processResumeFile(file)
+                        }
+                      }}
+                      className="hidden"
+                    />
+                    <div className="flex flex-col items-center gap-1">
+                      <UploadCloud className={`w-8 h-8 mb-1 ${isDragOver ? 'text-emerald-700 animate-bounce' : 'text-stone-500'}`} />
+                      <span className="font-radio font-bold text-xs text-black">
+                        {resumeFile?.name || 'Drag & Drop PDF Resume here or click to browse'}
+                      </span>
+                      <span className="text-[11px] text-stone-400">PDF, DOCX parsed dynamically in memory</span>
+                    </div>
+                  </label>
+
+                  {showReupload && (
+                    <button
+                      type="button"
+                      onClick={() => setShowReupload(false)}
+                      className="text-xs text-stone-500 hover:text-black font-semibold underline cursor-pointer"
+                    >
+                      Keep Previously Loaded Resume
+                    </button>
+                  )}
+                </form>
+              )}
+            </div>
+
+            {/* Start Interview Action Button */}
             <button
               onClick={handleStartSession}
-              className="w-full bg-black hover:bg-stone-800 text-white font-radio font-bold text-base py-4 rounded-2xl transition-all cursor-pointer shadow-md flex items-center justify-center gap-2 active:scale-95"
+              disabled={!resumeParsed || isUploading}
+              className="w-full bg-black hover:bg-stone-800 disabled:bg-stone-300 disabled:text-stone-500 text-white font-radio font-bold text-base py-4 rounded-2xl transition-all cursor-pointer shadow-md flex items-center justify-center gap-2 active:scale-95"
             >
-              <Play className="w-5 h-5 fill-emerald-400 text-emerald-400" />
-              <span>Start 5-Min Voice Interview</span>
+              {isUploading ? (
+                <>
+                  <Sparkles className="w-5 h-5 text-amber-400 animate-spin" />
+                  <span>Parsing Resume Context...</span>
+                </>
+              ) : !resumeParsed ? (
+                <span>Upload Resume Above to Unlock Interview</span>
+              ) : (
+                <>
+                  <Play className="w-5 h-5 fill-emerald-400 text-emerald-400" />
+                  <span>Start 5-Min Voice Interview</span>
+                </>
+              )}
             </button>
           </motion.div>
         ) : (

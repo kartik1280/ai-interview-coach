@@ -54,14 +54,64 @@ const getTimeOfDay = () => {
   return 'Good evening';
 };
 
-const buildSystemPrompt = (candidateName = 'Candidate', resumeText = '') => {
-  const cleanResume = resumeText.trim() || 'Candidate pursuing Software Engineering with experience in React, Node.js, and modern web application development.';
+const extractNameFromResume = async (resumeText) => {
+  if (!groq || !resumeText || resumeText.length < 10) return '';
+  try {
+    const completion = await groq.chat.completions.create({
+      messages: [
+        {
+          role: 'system',
+          content: 'You are a precise data extractor. Extract ONLY the full name of the candidate from the provided resume text. Return ONLY JSON format: {"candidateName": "Full Name"}. If no candidate name is present, return {"candidateName": ""}.'
+        },
+        {
+          role: 'user',
+          content: resumeText.substring(0, 1500)
+        }
+      ],
+      model: 'llama-3.3-70b-versatile',
+      temperature: 0,
+      max_tokens: 60,
+      response_format: { type: 'json_object' }
+    });
+    const parsed = JSON.parse(completion.choices[0]?.message?.content || '{}');
+    const name = parsed.candidateName || '';
+    return name.replace(/^["']|["']$/g, '').trim();
+  } catch (error) {
+    console.error('Failed to extract name from resume:', error.message);
+    return '';
+  }
+};
+
+const buildSystemPrompt = (accountOwner = 'Candidate', resumeText = '', resumeCandidateName = '') => {
+  const cleanResume = (resumeText || '').trim() || 'Candidate pursuing Software Engineering with experience in React, Node.js, and modern web application development.';
+  
+  const safeAccountOwner = accountOwner || 'Candidate';
+  const safeResumeName = resumeCandidateName || '';
+
+  let identityInstruction = '';
+  if (
+    safeResumeName &&
+    safeAccountOwner &&
+    !safeResumeName.toLowerCase().includes(safeAccountOwner.toLowerCase()) &&
+    !safeAccountOwner.toLowerCase().includes(safeResumeName.toLowerCase())
+  ) {
+    identityInstruction = `CRITICAL INSTRUCTION: The logged-in account belongs to ${safeAccountOwner}, but the uploaded resume is for ${safeResumeName}. 
+Before starting the interview or asking any technical questions, politely acknowledge this. Ask the user to confirm their identity (e.g., "I see you're logged in as ${safeAccountOwner}, but the resume is for ${safeResumeName}. Are you ${safeResumeName} practicing on a friend's account?"). 
+Do not proceed with technical interview questions until they clarify their identity.`;
+  } else {
+    const nameToGreet = safeResumeName || safeAccountOwner;
+    identityInstruction = `Start the interview by warmly welcoming ${nameToGreet} and briefly acknowledging a specific project or skill from their resume.`;
+  }
+
   return {
     role: 'system',
     content: `You are an expert technical interviewer conducting a 5-minute screening round. Keep your tone completely normal, conversational, and friend-like. Do not sound formal, robotic, or overly enthusiastic.
 
-Candidate Name: ${candidateName}
+Account Owner (Logged In): ${accountOwner}
+Resume Candidate Name: ${resumeCandidateName || accountOwner}
 Current Time Context: ${getTimeOfDay()}
+
+${identityInstruction}
 
 Here is the candidate's parsed resume data:
 <resume>
@@ -69,9 +119,9 @@ ${cleanResume}
 </resume>
 
 Instructions:
-1. Start the interview by briefly acknowledging a specific project or skill from their resume (e.g., if they list a React project, ask them about Vite, the Virtual DOM, state management, or custom hooks).
-2. Ask only ONE short question at a time.
-3. Listen to their response, provide brief, natural feedback (e.g., 'Got it, that makes sense,' or 'Hmm, good point,'), and ask a logical follow-up.
+1. Follow the identity instruction above if applicable. If names match or no discrepancy, ask only ONE short question at a time.
+2. Listen to their response, provide brief, natural feedback (e.g., 'Got it, that makes sense,' or 'Hmm, good point,'), and ask a logical follow-up.
+3. STRICT ANTI-REPETITION: Never repeat questions or statements previously asked in the conversation history. Always move the conversation forward with fresh questions. If candidate input is brief or unclear, ask for clarification once politely.
 4. CRITICAL FOR VOICE RHYTHM: Speak in short, natural sentences (1-3 sentences max per turn). Use em-dashes (—) for natural conversational pauses and ellipses (...) when trailing off or thinking.
 5. NO markdown, NO bullet points, NO code blocks, NO emojis, NO asterisks. You are speaking out loud over a live audio stream.`
   };
@@ -82,7 +132,7 @@ const generateTTSAudioBuffer = async (text) => {
   // Provider 1: ElevenLabs API (if key provided)
   if (ELEVENLABS_API_KEY) {
     try {
-      console.log('[ElevenLabs TTS] Generating humanized emotional voice...');
+      console.log(`[ElevenLabs TTS] Requesting voice synthesis (Voice ID: ${ELEVENLABS_VOICE_ID})...`);
       const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${ELEVENLABS_VOICE_ID}`, {
         method: 'POST',
         headers: {
@@ -103,9 +153,12 @@ const generateTTSAudioBuffer = async (text) => {
       });
       if (response.ok) {
         const arrayBuffer = await response.arrayBuffer();
-        return Buffer.from(arrayBuffer);
+        const buffer = Buffer.from(arrayBuffer);
+        console.log(`[ElevenLabs TTS] ✅ Success! Generated ${buffer.length} bytes MP3 audio buffer.`);
+        return buffer;
       }
-      console.warn('[ElevenLabs Error] HTTP status:', response.status);
+      const errBody = await response.text();
+      console.warn(`[ElevenLabs Error] HTTP status: ${response.status} - ${errBody}`);
     } catch (err) {
       console.error('[ElevenLabs Exception]', err.message);
     }
@@ -219,10 +272,19 @@ app.post('/api/parse-resume', upload.single('resume'), async (req, res) => {
     }
 
     console.log('✅ Successfully extracted resume text snippet:', extractedText.substring(0, 120) + '...');
+
+    // Extract candidate name from resume text using Groq LLM
+    let resumeCandidateName = '';
+    if (extractedText) {
+      resumeCandidateName = await extractNameFromResume(extractedText);
+    }
+    console.log('✅ Extracted resume candidate name:', resumeCandidateName || '(None)');
+
     res.json({
       success: true,
       filename: req.file.originalname,
-      resumeText: extractedText
+      resumeText: extractedText,
+      resumeCandidateName
     });
   } catch (err) {
     console.error('❌ Resume parse error:', err);
@@ -314,6 +376,7 @@ wss.on('connection', (ws) => {
   let abortController = null;
   let history = [];
   let candidateName = 'Manik';
+  let resumeCandidateName = '';
   let resumeText = '';
 
   // Heartbeat Ping
@@ -341,7 +404,7 @@ wss.on('connection', (ws) => {
         return;
       }
 
-      const systemPrompt = buildSystemPrompt(candidateName, resumeText);
+      const systemPrompt = buildSystemPrompt(candidateName, resumeText, resumeCandidateName);
       const groqMessages = [systemPrompt, ...history];
 
       console.log('[Groq Streaming] Generating response turn...');
@@ -349,6 +412,8 @@ wss.on('connection', (ws) => {
         messages: groqMessages,
         model: 'llama-3.3-70b-versatile',
         temperature: 0.65,
+        frequency_penalty: 0.8,
+        presence_penalty: 0.3,
         max_tokens: 160,
         stream: true
       });
@@ -441,6 +506,7 @@ wss.on('connection', (ws) => {
 
       if (data.type === 'init_context') {
         if (data.candidateName) candidateName = data.candidateName;
+        if (data.resumeCandidateName) resumeCandidateName = data.resumeCandidateName;
         if (data.resumeText) resumeText = data.resumeText;
         return;
       }
@@ -450,6 +516,7 @@ wss.on('connection', (ws) => {
         if (!text) return;
 
         if (data.candidateName) candidateName = data.candidateName;
+        if (data.resumeCandidateName) resumeCandidateName = data.resumeCandidateName;
         if (data.resumeText) resumeText = data.resumeText;
 
         console.log('[User Speech Received]:', text);

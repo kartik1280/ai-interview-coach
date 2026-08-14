@@ -43,6 +43,7 @@ export default function CreateInterview() {
 
     try {
       let parsedResumeText = ''
+      let parsedResumeCandidateName = ''
 
       // 1. Send uploaded resume to Express Backend /api/parse-resume for PDF text extraction
       if (file?.file) {
@@ -59,6 +60,7 @@ export default function CreateInterview() {
             const parseData = await parseRes.json()
             if (parseData.resumeText) {
               parsedResumeText = parseData.resumeText
+              parsedResumeCandidateName = parseData.resumeCandidateName || ''
               console.log('✅ Resume parsed successfully:', parsedResumeText.substring(0, 100) + '...')
             }
           }
@@ -70,6 +72,9 @@ export default function CreateInterview() {
       // Store context in localStorage for seamless round persistence
       if (parsedResumeText) {
         localStorage.setItem('interview_resume_text', parsedResumeText)
+      }
+      if (parsedResumeCandidateName) {
+        localStorage.setItem('resume_candidate_name', parsedResumeCandidateName)
       }
       localStorage.setItem('candidate_name', formData.fullName || 'Candidate')
       localStorage.setItem('target_position', formData.targetPosition || 'Software Developer')
@@ -97,7 +102,8 @@ export default function CreateInterview() {
             fullName: formData.fullName,
             targetPosition: formData.targetPosition,
             industry: formData.industry,
-            resumeText: parsedResumeText
+            resumeText: parsedResumeText,
+            resumeCandidateName: parsedResumeCandidateName
           }
         })
       }, 1200)
@@ -263,10 +269,10 @@ export default function CreateInterview() {
                         </div>
                         <div className="text-left">
                           <p className="font-bold text-sm text-black leading-tight">
-                            {file.name}
+                            {file?.name}
                           </p>
                           <p className="text-xs text-stone-400">
-                            {file.size}
+                            {file?.size}
                           </p>
                         </div>
                       </div>

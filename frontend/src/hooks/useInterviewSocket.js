@@ -10,9 +10,17 @@ const WS_URL = 'ws://localhost:5050';
  * 3. UI State Lock Reset on Socket Close/Error
  * 4. Safe Base64 Audio Decoding & Single High-Quality Neural Audio Block Handling
  */
-export function useInterviewSocket(resumeText = '', candidateName = 'Manik', enabled = true) {
+export function useInterviewSocket(resumeText = '', candidateName = 'Manik', resumeCandidateName = '', enabled = true) {
+  // Normalize arguments if 3rd arg is boolean (enabled)
+  let actualResumeCandidateName = resumeCandidateName;
+  let actualEnabled = enabled;
+  if (typeof resumeCandidateName === 'boolean') {
+    actualEnabled = resumeCandidateName;
+    actualResumeCandidateName = '';
+  }
+
   const [aiText, setAiText] = useState('');
-  const [status, setStatus] = useState(enabled ? 'connecting' : 'idle'); // idle | connecting | listening | ai_thinking | ai_speaking | error
+  const [status, setStatus] = useState(actualEnabled ? 'connecting' : 'idle'); // idle | connecting | listening | ai_thinking | ai_speaking | error
   const [isConnected, setIsConnected] = useState(false);
   const [transcript, setTranscript] = useState('');
   const [fullTranscript, setFullTranscript] = useState([]);
@@ -35,10 +43,12 @@ export function useInterviewSocket(resumeText = '', candidateName = 'Manik', ena
   const aiTextRef = useRef('');
 
   // Context refs for WebSocket
-  const candidateNameRef = useRef(candidateName);
-  const resumeTextRef = useRef(resumeText);
-  candidateNameRef.current = candidateName;
-  resumeTextRef.current = resumeText;
+  const candidateNameRef = useRef(candidateName || 'Manik');
+  const resumeCandidateNameRef = useRef(actualResumeCandidateName || '');
+  const resumeTextRef = useRef(resumeText || '');
+  candidateNameRef.current = candidateName || 'Manik';
+  resumeCandidateNameRef.current = actualResumeCandidateName || '';
+  resumeTextRef.current = resumeText || '';
 
   // Flags
   const isAiSpeakingRef = useRef(false);
@@ -51,6 +61,20 @@ export function useInterviewSocket(resumeText = '', candidateName = 'Manik', ena
   useEffect(() => {
     aiTextRef.current = aiText;
   }, [aiText]);
+
+  // ── Helper to Safely Start Speech Recognition ──
+  const safeStartRecognition = useCallback(() => {
+    if (!recognitionRef.current || !mountedRef.current || !isRecordingRef.current) return;
+    if (isMicStartingRef.current) return;
+
+    try {
+      isMicStartingRef.current = true;
+      recognitionRef.current.start();
+      console.log('🎙️ Calling recognition.start()...');
+    } catch (e) {
+      isMicStartingRef.current = false;
+    }
+  }, []);
 
   // ── Instant Conversational Thinking Fillers ──
   const playInstantFiller = useCallback(() => {
@@ -66,51 +90,6 @@ export function useInterviewSocket(resumeText = '', candidateName = 'Manik', ena
       window.speechSynthesis.speak(utterance);
     } catch (e) {
       // ignore
-    }
-  }, []);
-
-  // ── Browser SpeechSynthesis Fallback ──
-  const speakTextFallback = useCallback((text) => {
-    const textToSpeak = text || aiTextRef.current;
-    if (!('speechSynthesis' in window) || !textToSpeak) {
-      setStatus('listening');
-      return;
-    }
-    try {
-      window.speechSynthesis.cancel();
-      const utterance = new SpeechSynthesisUtterance(textToSpeak);
-      utterance.rate = 1.0;
-      utterance.pitch = 1.0;
-      utterance.lang = 'en-US';
-
-      const voices = window.speechSynthesis.getVoices();
-      const preferredVoice = voices.find(v => v.lang.startsWith('en') && (v.name.includes('Google') || v.name.includes('Natural') || v.name.includes('Samantha') || v.name.includes('Alex')));
-      if (preferredVoice) {
-        utterance.voice = preferredVoice;
-      }
-
-      utterance.onstart = () => {
-        isAiSpeakingRef.current = true;
-        setStatus('ai_speaking');
-      };
-
-      utterance.onend = () => {
-        isAiSpeakingRef.current = false;
-        setStatus('listening');
-      };
-
-      utterance.onerror = () => {
-        isAiSpeakingRef.current = false;
-        setStatus('listening');
-      };
-
-      isAiSpeakingRef.current = true;
-      setStatus('ai_speaking');
-      window.speechSynthesis.speak(utterance);
-    } catch (err) {
-      console.warn('SpeechSynthesis exception:', err);
-      isAiSpeakingRef.current = false;
-      setStatus('listening');
     }
   }, []);
 
@@ -165,16 +144,106 @@ export function useInterviewSocket(resumeText = '', candidateName = 'Manik', ena
     }
   }, [stopAudio]);
 
+  // Transcript entry logger
+  const addTranscriptEntry = useCallback((role, content) => {
+    const entry = { role, content };
+    fullTranscriptRef.current = [...fullTranscriptRef.current, entry];
+    setFullTranscript(fullTranscriptRef.current);
+  }, []);
+
+  // ── Browser SpeechSynthesis Fallback ──
+  const speakTextFallback = useCallback((text) => {
+    const textToSpeak = text || aiTextRef.current;
+    if (!('speechSynthesis' in window) || !textToSpeak) {
+      setStatus('listening');
+      return;
+    }
+    try {
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(textToSpeak);
+      utterance.rate = 1.0;
+      utterance.pitch = 1.0;
+      utterance.lang = 'en-US';
+
+      const voices = window.speechSynthesis.getVoices();
+      const preferredVoice = voices.find(v => v.lang.startsWith('en') && (v.name.includes('Google') || v.name.includes('Natural') || v.name.includes('Samantha') || v.name.includes('Alex')));
+      if (preferredVoice) {
+        utterance.voice = preferredVoice;
+      }
+
+      utterance.onstart = () => {
+        isAiSpeakingRef.current = true;
+        setStatus('ai_speaking');
+        // Mute mic & flush transcript buffer
+        transcriptBufferRef.current = '';
+        setTranscript('');
+        if (silenceTimerRef.current) {
+          clearTimeout(silenceTimerRef.current);
+          silenceTimerRef.current = null;
+        }
+        if (recognitionRef.current) {
+          try { recognitionRef.current.abort(); } catch (e) {}
+        }
+      };
+
+      const handleFallbackAudioEnd = () => {
+        transcriptBufferRef.current = '';
+        setTranscript('');
+        // 300ms grace window to prevent speaker echo pickup
+        setTimeout(() => {
+          if (!mountedRef.current) return;
+          isAiSpeakingRef.current = false;
+          transcriptBufferRef.current = '';
+          setTranscript('');
+          setStatus('listening');
+          safeStartRecognition();
+        }, 300);
+      };
+
+      utterance.onend = handleFallbackAudioEnd;
+      utterance.onerror = handleFallbackAudioEnd;
+
+      isAiSpeakingRef.current = true;
+      setStatus('ai_speaking');
+      window.speechSynthesis.speak(utterance);
+    } catch (err) {
+      console.warn('SpeechSynthesis exception:', err);
+      isAiSpeakingRef.current = false;
+      setStatus('listening');
+    }
+  }, [safeStartRecognition]);
+
   // ── Audio Queue System ──
   const playNextInQueue = useCallback(() => {
     if (audioQueueRef.current.length === 0) {
-      isAiSpeakingRef.current = false;
-      setStatus('listening');
+      // 300ms grace window to let speaker audio finish echoing into room
+      setTimeout(() => {
+        if (!mountedRef.current) return;
+        isAiSpeakingRef.current = false;
+        transcriptBufferRef.current = '';
+        setTranscript('');
+        setStatus('listening');
+        safeStartRecognition();
+      }, 300);
       return;
     }
 
     isAiSpeakingRef.current = true;
     setStatus('ai_speaking');
+
+    // Flush buffer & cancel any pending silence timers
+    transcriptBufferRef.current = '';
+    setTranscript('');
+    if (silenceTimerRef.current) {
+      clearTimeout(silenceTimerRef.current);
+      silenceTimerRef.current = null;
+    }
+
+    // Abort speech recognition so it stops listening while AI speaks
+    if (recognitionRef.current) {
+      try { recognitionRef.current.abort(); } catch (e) {}
+    }
+
     const base64 = audioQueueRef.current.shift();
 
     if (!base64 || typeof base64 !== 'string') {
@@ -200,27 +269,36 @@ export function useInterviewSocket(resumeText = '', candidateName = 'Manik', ena
         console.log('🔊 Playing Neural audio payload...');
       };
 
-      audio.onended = () => {
+      const handleAudioEnd = () => {
         URL.revokeObjectURL(audioUrl);
         audioRef.current = null;
-        isAiSpeakingRef.current = false;
-        playNextInQueue();
+        transcriptBufferRef.current = '';
+        setTranscript('');
+
+        // 300ms grace window before enabling mic again
+        setTimeout(() => {
+          if (!mountedRef.current) return;
+          if (audioQueueRef.current.length === 0) {
+            isAiSpeakingRef.current = false;
+            transcriptBufferRef.current = '';
+            setTranscript('');
+            setStatus('listening');
+            safeStartRecognition();
+          } else {
+            playNextInQueue();
+          }
+        }, 300);
       };
 
+      audio.onended = handleAudioEnd;
       audio.onerror = (e) => {
         console.error('🔊 Neural audio error. Skipping chunk:', e);
-        URL.revokeObjectURL(audioUrl);
-        audioRef.current = null;
-        isAiSpeakingRef.current = false;
-        playNextInQueue();
+        handleAudioEnd();
       };
 
       audio.play().catch((err) => {
         console.warn('🔊 Audio play blocked or failed. Skipping chunk:', err);
-        URL.revokeObjectURL(audioUrl);
-        audioRef.current = null;
-        isAiSpeakingRef.current = false;
-        playNextInQueue();
+        handleAudioEnd();
       });
     } catch (e) {
       console.warn('Audio base64 decoding exception, skipping chunk:', e);
@@ -228,7 +306,7 @@ export function useInterviewSocket(resumeText = '', candidateName = 'Manik', ena
       isAiSpeakingRef.current = false;
       playNextInQueue();
     }
-  }, []);
+  }, [safeStartRecognition]);
 
   const enqueueAudio = useCallback((base64Data) => {
     if (!base64Data) return;
@@ -237,13 +315,6 @@ export function useInterviewSocket(resumeText = '', candidateName = 'Manik', ena
       playNextInQueue();
     }
   }, [playNextInQueue]);
-
-  // Transcript entry logger
-  const addTranscriptEntry = useCallback((role, content) => {
-    const entry = { role, content };
-    fullTranscriptRef.current = [...fullTranscriptRef.current, entry];
-    setFullTranscript(fullTranscriptRef.current);
-  }, []);
 
   // ── Send User Speech Payload ──
   const sendUserSpeech = useCallback((textToSend) => {
@@ -259,7 +330,8 @@ export function useInterviewSocket(resumeText = '', candidateName = 'Manik', ena
       type: 'user_speech',
       userMessage: trimmed,
       resumeText: resumeTextRef.current,
-      candidateName: candidateNameRef.current
+      candidateName: candidateNameRef.current,
+      resumeCandidateName: resumeCandidateNameRef.current
     };
 
     console.log('⬆️ Sending user speech payload to server:', payload);
@@ -319,20 +391,6 @@ export function useInterviewSocket(resumeText = '', candidateName = 'Manik', ena
     }
   }, [sendInterrupt]);
 
-  // ── Helper to Safely Start Speech Recognition ──
-  const safeStartRecognition = useCallback(() => {
-    if (!recognitionRef.current || !mountedRef.current || !isRecordingRef.current) return;
-    if (isMicStartingRef.current) return;
-
-    try {
-      isMicStartingRef.current = true;
-      recognitionRef.current.start();
-      console.log('🎙️ Calling recognition.start()...');
-    } catch (e) {
-      isMicStartingRef.current = false;
-    }
-  }, []);
-
   // ── Speech Recognition Auto-Restart Loop ──
   const setupSpeechRecognition = useCallback(() => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -357,6 +415,13 @@ export function useInterviewSocket(resumeText = '', candidateName = 'Manik', ena
     };
 
     recognition.onresult = (event) => {
+      // 🔇 Audio Loop Defense: Ignore any input picked up while AI audio is active
+      if (isAiSpeakingRef.current) {
+        console.log('🔇 [Audio Loop Defense] Ignoring speech recognition result during AI audio playback.');
+        transcriptBufferRef.current = '';
+        return;
+      }
+
       let currentTranscript = '';
       let isFinalResult = false;
 
@@ -370,11 +435,6 @@ export function useInterviewSocket(resumeText = '', candidateName = 'Manik', ena
       const trimmed = currentTranscript.trim();
       // Ignore phantom noise: require at least 3 characters for barge-in interrupt or submission
       if (trimmed.length >= 3) {
-        if (isAiSpeakingRef.current) {
-          console.log('🗣️ Candidate real voice input detected during AI turn (>2 chars)! Smooth fading out AI audio...');
-          sendInterrupt();
-        }
-
         const lastSnippet = event.results[event.results.length - 1][0].transcript;
         console.log('📝 Transcript received:', lastSnippet, isFinalResult ? '(FINAL)' : '(INTERIM)');
         transcriptBufferRef.current = trimmed;
@@ -424,6 +484,24 @@ export function useInterviewSocket(resumeText = '', candidateName = 'Manik', ena
     safeStartRecognition();
   }, [sendInterrupt, safeStartRecognition, sendUserSpeech]);
 
+  // WebSocket message handler updates
+  const handleWsMessage = useCallback((data) => {
+    if (data.type === 'text' && data.content) {
+      setAiText(data.content);
+      aiTextRef.current = data.content;
+      addTranscriptEntry('assistant', data.content);
+      setStatus('ai_speaking');
+      hasReceivedAudioRef.current = false;
+
+      setTimeout(() => {
+        if (!hasReceivedAudioRef.current && mountedRef.current && isRecordingRef.current) {
+          console.log('🔊 Using zero-cost browser SpeechSynthesis fallback...');
+          speakTextFallback(data.content);
+        }
+      }, 600);
+    }
+  }, [addTranscriptEntry, speakTextFallback]);
+
   // ── WebSocket Setup (20s Keep-Alive Ping & Auto-Reconnect) ──
   const connectWebSocket = useCallback(() => {
     if (!mountedRef.current) return;
@@ -456,6 +534,7 @@ export function useInterviewSocket(resumeText = '', candidateName = 'Manik', ena
         const initPayload = {
           type: 'init_context',
           candidateName: candidateNameRef.current,
+          resumeCandidateName: resumeCandidateNameRef.current,
           resumeText: resumeTextRef.current
         };
         ws.send(JSON.stringify(initPayload));
@@ -541,27 +620,7 @@ export function useInterviewSocket(resumeText = '', candidateName = 'Manik', ena
         }, 3000);
       }
     }
-  }, [setupSpeechRecognition, enqueueAudio, speakTextFallback]);
-
-
-
-  // WebSocket message handler updates
-  const handleWsMessage = useCallback((data) => {
-    if (data.type === 'text' && data.content) {
-      setAiText(data.content);
-      aiTextRef.current = data.content;
-      addTranscriptEntry('assistant', data.content);
-      setStatus('ai_speaking');
-      hasReceivedAudioRef.current = false;
-
-      setTimeout(() => {
-        if (!hasReceivedAudioRef.current && mountedRef.current && isRecordingRef.current) {
-          console.log('🔊 Using zero-cost browser SpeechSynthesis fallback...');
-          speakTextFallback(data.content);
-        }
-      }, 600);
-    }
-  }, [addTranscriptEntry, speakTextFallback]);
+  }, [setupSpeechRecognition, enqueueAudio, handleWsMessage, speakTextFallback]);
 
   // ── Main Effect (Runs when enabled is true) ──
   useEffect(() => {
