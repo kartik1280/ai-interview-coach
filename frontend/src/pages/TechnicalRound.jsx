@@ -186,26 +186,30 @@ export default function TechnicalRound() {
 
   // Map backend questions to PROBLEM shapes
   const mappedProblems = backendQuestions.map((bq) => {
-    // Try to find matching local problem by title substring
-    const matched = PROBLEMS.find(p => bq.questionText.toLowerCase().includes(p.title.toLowerCase()))
-    if (matched) {
-      return { ...matched, questionId: bq.id }
+    const rawDiff = (bq.difficulty || 'medium').toLowerCase()
+    let timeLimitSec = bq.timeLimitSeconds
+    if (!timeLimitSec) {
+      if (rawDiff === 'easy') timeLimitSec = 600
+      else if (rawDiff === 'hard') timeLimitSec = 2700
+      else timeLimitSec = 1500
     }
-    // Fallback parsing if table contents are custom
-    const parts = bq.questionText.split('|')
-    const difficultyPart = parts[0]?.replace('Difficulty:', '').trim() || 'Medium'
-    const questionBody = parts[1]?.trim() || bq.questionText
+
+    // Parse title & description
+    const questionText = bq.questionText || 'Technical Coding Problem'
+    const titleMatch = questionText.match(/^\[(.*?)\]\s*(.*)/)
+    const displayTitle = titleMatch ? titleMatch[2].split('\n')[0] : questionText.split('\n')[0]
     
     return {
       id: bq.id,
       questionId: bq.id,
-      title: questionBody.split('\n')[0] || 'Technical Coding Problem',
-      difficulty: difficultyPart,
-      recommendedTimeSeconds: 1200,
-      description: questionBody,
-      example: 'Refer to problem description details.',
+      title: displayTitle || 'Technical Coding Problem',
+      difficulty: rawDiff.charAt(0).toUpperCase() + rawDiff.slice(1),
+      timeLimitSeconds: timeLimitSec,
+      recommendedTimeSeconds: timeLimitSec,
+      description: questionText,
+      example: 'Refer to problem description for sample inputs.',
       starterCodes: {
-        javascript: `// Write your solution here\nfunction solve() {\n  \n}`,
+        javascript: bq.starterCode || `// Write your solution here\nfunction solve() {\n  \n}`,
         python: `def solve():\n    pass`,
         java: `public class Solution {\n    public static void solve() {\n        \n    }\n}`,
         cpp: `void solve() {\n    \n}`
@@ -221,14 +225,21 @@ export default function TechnicalRound() {
   const [code, setCode] = useState(finalProblemsList[0].starterCodes?.javascript || '')
   const [output, setOutput] = useState('Run your code to see logs and test results here.')
   const [isRunning, setIsRunning] = useState(false)
+  const [isSubmitting, setIsSubmitting] = useState(false)
   const [isSubmitted, setIsSubmitted] = useState(false)
   const [evalScore, setEvalScore] = useState(null)
   const [evalFeedback, setEvalFeedback] = useState('')
 
   // Timer State
-  const [timeLeft, setTimeLeft] = useState(finalProblemsList[0].recommendedTimeSeconds)
+  const [timeLeft, setTimeLeft] = useState(finalProblemsList[0].timeLimitSeconds || finalProblemsList[0].recommendedTimeSeconds)
   const [isTimerActive, setIsTimerActive] = useState(true)
   const [showTimeUpModal, setShowTimeUpModal] = useState(false)
+
+  // Automatic submit on timeout
+  const handleTimeoutAutoSubmit = () => {
+    if (isSubmitting) return
+    handleSubmitSolution()
+  }
 
   // Timer Countdown Effect
   useEffect(() => {
@@ -240,6 +251,7 @@ export default function TechnicalRound() {
     } else if (timeLeft === 0 && isTimerActive) {
       setIsTimerActive(false)
       setShowTimeUpModal(true)
+      handleTimeoutAutoSubmit()
     }
     return () => clearInterval(interval)
   }, [isTimerActive, timeLeft])
@@ -319,6 +331,8 @@ export default function TechnicalRound() {
   }
 
   const handleSubmitSolution = async () => {
+    if (isSubmitting) return
+    setIsSubmitting(true)
     setIsSubmitted(false)
     setIsRunning(true)
     setOutput('Submitting your solution and evaluating...')
@@ -337,7 +351,7 @@ export default function TechnicalRound() {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          answerText: code
+          answerText: code || "// No answer submitted (Timeout)"
         })
       })
       
@@ -357,6 +371,7 @@ export default function TechnicalRound() {
       alert(`Submission failed: ${err.message}`)
     } finally {
       setIsRunning(false)
+      setIsSubmitting(false)
     }
   }
 

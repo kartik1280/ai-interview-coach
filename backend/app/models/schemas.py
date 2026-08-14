@@ -59,12 +59,17 @@ class QuestionResponse(BaseModel):
     id: str
     roundId: str
     questionText: str
+    difficulty: Optional[str] = "medium"
+    timeLimitSeconds: Optional[int] = 1500
+    starterCode: Optional[str] = None
+    options: Optional[List[str]] = None
 
 class RoundStartResponse(BaseModel):
     roundId: str
     roundType: str
     status: str
     questions: List[QuestionResponse]
+    totalTimeLimitSeconds: Optional[int] = None
 
 class AnswerSubmitRequest(BaseModel):
     answerText: str

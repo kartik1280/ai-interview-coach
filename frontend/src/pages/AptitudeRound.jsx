@@ -60,18 +60,12 @@ export default function AptitudeRound() {
 
   // Map backend questions to PROBLEM shapes
   const mappedQuestions = backendQuestions.map((bq) => {
-    // Try to match with local static questions by checking question text similarity
-    const matched = APTITUDE_QUESTIONS.find(q => bq.questionText.toLowerCase().includes(q.title.toLowerCase()))
-    if (matched) {
-      return { ...matched, questionId: bq.id }
-    }
-    
-    // Otherwise parse Options: A) ... | B) ... | C) ... | D) ...
-    let questionTitle = bq.questionText
+    // Parse Options: A) ... | B) ... | C) ... | D) ...
+    let questionTitle = bq.questionText || ''
     let options = ['A) Option A', 'B) Option B', 'C) Option C', 'D) Option D']
     
-    if (bq.questionText.includes(' Options: ')) {
-      const parts = bq.questionText.split(' Options: ')
+    if (questionTitle.includes(' Options: ')) {
+      const parts = questionTitle.split(' Options: ')
       questionTitle = parts[0]
       const optStr = parts[1]
       if (optStr.includes(' | ')) {
@@ -87,7 +81,7 @@ export default function AptitudeRound() {
       description: 'Select the correct choice from the options below.',
       options: options,
       correctOption: 1, // fallback
-      explanation: 'See performance report for final detailed analysis.'
+      explanation: 'See performance report for detailed category analysis.'
     }
   })
 
@@ -97,16 +91,23 @@ export default function AptitudeRound() {
   const [selectedOption, setSelectedOption] = useState(null)
   const [showExplanation, setShowExplanation] = useState(false)
   const [scratchpad, setScratchpad] = useState('')
+  const [isSubmitting, setIsSubmitting] = useState(false)
   const [isSubmitted, setIsSubmitted] = useState(false)
   const [evalScore, setEvalScore] = useState(null)
   const [evalFeedback, setEvalFeedback] = useState('')
 
-  // 15 Minutes Timer State (900 seconds)
+  // 15 Minutes Total Timer State (900 seconds)
   const [timeLeft, setTimeLeft] = useState(900)
   const [isTimerActive, setIsTimerActive] = useState(true)
   const [showTimeUpModal, setShowTimeUpModal] = useState(false)
 
   const currentQ = finalQuestionsList[currentIdx]
+
+  // Handle timeout auto-submit
+  const handleTimeoutAutoSubmit = () => {
+    if (isSubmitting) return
+    handleSubmitAssessment(true)
+  }
 
   // Timer Effect with Auto-Submit on Expiry
   useEffect(() => {
@@ -117,9 +118,8 @@ export default function AptitudeRound() {
       }, 1000)
     } else if (timeLeft === 0 && isTimerActive) {
       setIsTimerActive(false)
-      setIsSubmitted(true)
-      setShowExplanation(true)
       setShowTimeUpModal(true)
+      handleTimeoutAutoSubmit()
     }
     return () => clearInterval(interval)
   }, [isTimerActive, timeLeft])
@@ -143,19 +143,21 @@ export default function AptitudeRound() {
     setShowExplanation(false)
   }
 
-  const handleSubmitAssessment = async () => {
-    if (selectedOption === null) {
+  const handleSubmitAssessment = async (isTimeout = false) => {
+    if (isSubmitting) return
+    if (!isTimeout && selectedOption === null) {
       alert("Please select an option before submitting.")
       return
     }
 
+    setIsSubmitting(true)
     try {
       const { data: { session }, error: sessionError } = await supabase.auth.getSession()
       if (sessionError || !session) {
         throw new Error('No active user session. Please log in.')
       }
 
-      const letter = ['A', 'B', 'C', 'D'][selectedOption]
+      const letter = selectedOption !== null ? ['A', 'B', 'C', 'D'][selectedOption] : 'A'
       const qId = currentQ.questionId || currentQ.id
       const res = await fetch(`${import.meta.env.VITE_API_BASE_URL}/round/${roundId}/answer?question_id=${qId}`, {
         method: 'POST',
@@ -181,7 +183,9 @@ export default function AptitudeRound() {
       setShowExplanation(true)
     } catch (err) {
       console.error('Error submitting answer:', err)
-      alert(`Submission failed: ${err.message}`)
+      if (!isTimeout) alert(`Submission failed: ${err.message}`)
+    } finally {
+      setIsSubmitting(false)
     }
   }
 
@@ -256,7 +260,7 @@ export default function AptitudeRound() {
 
             {/* Question Numbers Tabs */}
             <div className="flex items-center gap-1.5 ml-2">
-              {APTITUDE_QUESTIONS.map((q, idx) => (
+              {finalQuestionsList.map((q, idx) => (
                 <button
                   key={q.id}
                   onClick={() => {
