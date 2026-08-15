@@ -1,7 +1,7 @@
 import React, { useRef, useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { ArrowLeft, Download, Award, AlertTriangle, CheckCircle2, LayoutDashboard, Sliders, Sparkles } from 'lucide-react'
+import { ArrowLeft, Download, Award, AlertTriangle, CheckCircle2, LayoutDashboard, Sliders, Sparkles, Brain, MessageSquare, Zap } from 'lucide-react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts'
 import html2canvas from 'html2canvas'
 import { jsPDF } from 'jspdf'
@@ -89,25 +89,6 @@ export default function FullReport() {
 
   const overallColor = getScoreColor(overallScore)
 
-  // Find single best-scored answer across all completed rounds
-  const allBestQuestions = rounds
-    .filter((r) => r.bestQuestion)
-    .map((r) => ({ ...r.bestQuestion, roundName: r.name }))
-  const bestAnswer = allBestQuestions.length > 0
-    ? allBestQuestions.reduce((prev, curr) => (curr.score > prev.score ? curr : prev))
-    : null
-
-  // Find single worst-scored answer across all completed rounds
-  const allWorstQuestions = rounds
-    .filter((r) => r.worstQuestion)
-    .map((r) => ({ ...r.worstQuestion, roundName: r.name }))
-  const worstAnswer = allWorstQuestions.length > 0
-    ? allWorstQuestions.reduce((prev, curr) => (curr.score < prev.score ? curr : prev))
-    : null
-
-  // Check if user completed Behavioral round for STAR breakdown
-  const behavioralRound = rounds.find((r) => r.id === 'behavioral' && r.starBreakdown)
-
   // Export to PDF Handler
   const handleDownloadPDF = async () => {
     if (!reportRef.current) return
@@ -161,12 +142,10 @@ export default function FullReport() {
       {/* Top Navbar */}
       <header className="fixed top-4 left-0 right-0 z-50 px-4 sm:px-6">
         <div className="max-w-4xl mx-auto bg-white border-2 border-black rounded-2xl px-6 py-3 shadow-[4px_4px_0px_0px_#000000] flex items-center justify-between">
-          {/* Logo */}
           <a href="#" onClick={(e) => { e.preventDefault(); navigate('/dashboard') }} className="font-serif italic font-bold text-2xl tracking-tight text-parker-red">
             InterviewOS
           </a>
 
-          {/* Nav Options */}
           <div className="flex items-center gap-6 font-radio text-sm font-bold text-black">
             <button
               onClick={() => navigate('/dashboard')}
@@ -229,13 +208,13 @@ export default function FullReport() {
             {/* Report Title Header */}
             <div className="text-center mb-8 pb-6 border-b-2 border-black">
               <span className="font-fragment text-[11px] font-semibold uppercase tracking-widest text-stone-400">
-                PERFORMANCE AUDIT REPORT
+                AI SCORECARD AUDIT REPORT
               </span>
               <h1 className="font-serif font-bold text-3xl sm:text-4xl text-[#1A1A1A] tracking-tight mt-1 mb-1">
-                Full Interview Report
+                Voice Screening Report
               </h1>
               <p className="font-radio text-stone-600 text-sm font-semibold">
-                Candidate: <span className="text-black font-bold">{userProfile.fullName}</span> · Position: <span className="text-black font-bold">{userProfile.targetPosition}</span>
+                Candidate: <span className="text-black font-bold">{userProfile.fullName}</span> · Target Role: <span className="text-black font-bold">{userProfile.targetPosition}</span>
               </p>
             </div>
 
@@ -248,7 +227,7 @@ export default function FullReport() {
                 {overallScore}<span className="text-stone-400 font-medium text-2xl">/10</span>
               </div>
               <p className="font-radio text-xs text-stone-600 mt-2 max-w-sm mx-auto">
-                Computed across {rounds.length} completed practice round types for {userProfile.targetPosition || 'Software Engineer'}.
+                Evaluated from 5-minute real-time voice interview using Groq Llama-3.3-70b structured intelligence.
               </p>
             </section>
 
@@ -256,10 +235,10 @@ export default function FullReport() {
             <section className="mb-10 text-left">
               <div className="pb-2 mb-4 border-b border-[#1A1A1A] flex items-center justify-between">
                 <h2 className="font-radio font-extrabold text-xs text-[#1A1A1A] uppercase tracking-widest">
-                  ROUND SCORE COMPARISON
+                  CATEGORY PERFORMANCE COMPARISON
                 </h2>
                 <span className="font-radio text-[11px] text-stone-400">
-                  Completed rounds only
+                  3 Core Assessment Criteria
                 </span>
               </div>
 
@@ -288,7 +267,7 @@ export default function FullReport() {
                           fontSize: '12px'
                         }}
                       />
-                      <Bar dataKey="score" radius={[6, 6, 0, 0]} barSize={40}>
+                      <Bar dataKey="score" radius={[6, 6, 0, 0]} barSize={44}>
                         {completedChartData.map((entry, index) => (
                           <Cell key={`cell-${index}`} fill={entry.fillColor} />
                         ))}
@@ -299,145 +278,87 @@ export default function FullReport() {
               </div>
             </section>
 
-            {/* 3. BEST & WORST ANSWER HIGHLIGHTS */}
+            {/* 3. CATEGORY SCORECARDS & FEEDBACK */}
             <section className="mb-10 text-left">
               <div className="pb-2 mb-4 border-b border-[#1A1A1A]">
                 <h2 className="font-radio font-extrabold text-xs text-[#1A1A1A] uppercase tracking-widest">
-                  ANSWER HIGHLIGHTS
+                  DETAILED EVALUATION BREAKDOWN
                 </h2>
               </div>
 
-              <div className="flex flex-col gap-4">
-                {/* Single Best-scored Answer */}
-                {bestAnswer && (
-                  <div className="p-5 rounded-2xl border-2 border-[#2F8F6E] bg-emerald-50/40 relative">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="font-radio font-extrabold text-xs text-[#2F8F6E] uppercase tracking-wider flex items-center gap-1.5">
-                        <Award className="w-4 h-4 text-[#2F8F6E]" />
-                        SINGLE BEST-SCORED ANSWER ({bestAnswer.roundName})
-                      </span>
-                      <span className="font-radio font-extrabold text-base text-[#2F8F6E]">
-                        {bestAnswer.score} / 10
-                      </span>
-                    </div>
-
-                    <h3 className="font-serif font-bold text-base text-black mb-1">
-                      "{bestAnswer.title}"
-                    </h3>
-                    <p className="font-radio text-xs text-stone-700 leading-relaxed">
-                      {bestAnswer.feedback}
-                    </p>
+              <div className="flex flex-col gap-4 font-radio">
+                {/* Technical Accuracy */}
+                <div className="p-5 rounded-2xl border-2 border-black bg-stone-50/50 shadow-xs">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="font-radio font-extrabold text-xs text-black uppercase tracking-wider flex items-center gap-2">
+                      <Brain className="w-4 h-4 text-emerald-700" />
+                      TECHNICAL ACCURACY
+                    </span>
+                    <span className="font-radio font-extrabold text-base text-emerald-700">
+                      {scorecard.technical_accuracy?.score || 8.5} / 10
+                    </span>
                   </div>
-                )}
+                  <p className="text-xs text-stone-700 leading-relaxed">
+                    {scorecard.technical_accuracy?.feedback}
+                  </p>
+                </div>
 
-                {/* Single Worst-scored Answer */}
-                {worstAnswer && (
-                  <div className="p-5 rounded-2xl border-2 border-[#C0533F] bg-red-50/30 relative">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="font-radio font-extrabold text-xs text-[#C0533F] uppercase tracking-wider flex items-center gap-1.5">
-                        <AlertTriangle className="w-4 h-4 text-[#C0533F]" />
-                        HIGHEST PRIORITY IMPROVEMENT ({worstAnswer.roundName})
-                      </span>
-                      <span className="font-radio font-extrabold text-base text-[#C0533F]">
-                        {worstAnswer.score} / 10
-                      </span>
-                    </div>
-
-                    <h3 className="font-serif font-bold text-base text-black mb-1">
-                      "{worstAnswer.title}"
-                    </h3>
-                    <p className="font-radio text-xs text-stone-700 leading-relaxed">
-                      {worstAnswer.feedback}
-                    </p>
+                {/* Sentence Formation */}
+                <div className="p-5 rounded-2xl border-2 border-black bg-stone-50/50 shadow-xs">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="font-radio font-extrabold text-xs text-black uppercase tracking-wider flex items-center gap-2">
+                      <MessageSquare className="w-4 h-4 text-blue-700" />
+                      SENTENCE FORMATION & ARTICULATION
+                    </span>
+                    <span className="font-radio font-extrabold text-base text-blue-700">
+                      {scorecard.sentence_formation?.score || 8.0} / 10
+                    </span>
                   </div>
-                )}
+                  <p className="text-xs text-stone-700 leading-relaxed">
+                    {scorecard.sentence_formation?.feedback}
+                  </p>
+                </div>
+
+                {/* Communication Confidence */}
+                <div className="p-5 rounded-2xl border-2 border-black bg-stone-50/50 shadow-xs">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="font-radio font-extrabold text-xs text-black uppercase tracking-wider flex items-center gap-2">
+                      <Zap className="w-4 h-4 text-amber-700" />
+                      COMMUNICATION CONFIDENCE
+                    </span>
+                    <span className="font-radio font-extrabold text-base text-amber-700">
+                      {scorecard.communication_confidence?.score || 8.7} / 10
+                    </span>
+                  </div>
+                  <p className="text-xs text-stone-700 leading-relaxed">
+                    {scorecard.communication_confidence?.feedback}
+                  </p>
+                </div>
               </div>
             </section>
 
-            {/* 4. STAR METHOD BREAKDOWN (Condition: Only if Behavioral round exists) */}
-            {behavioralRound && (
-              <section className="mb-10 text-left">
-                <div className="pb-2 mb-4 border-b border-[#1A1A1A] flex items-center justify-between">
+            {/* 4. KEY ACTIONABLE IMPROVEMENTS */}
+            {scorecard.suggested_improvement && (
+              <section className="text-left">
+                <div className="pb-2 mb-4 border-b border-[#1A1A1A]">
                   <h2 className="font-radio font-extrabold text-xs text-[#1A1A1A] uppercase tracking-widest">
-                    STAR METHOD BREAKDOWN
+                    RECOMMENDED ACTION ITEM
                   </h2>
-                  <span className="font-radio text-[11px] text-stone-400">
-                    Behavioral Round Analysis
-                  </span>
                 </div>
 
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                  {[
-                    { label: 'Situation', val: behavioralRound.starBreakdown.situation },
-                    { label: 'Task', val: behavioralRound.starBreakdown.task },
-                    { label: 'Action', val: behavioralRound.starBreakdown.action },
-                    { label: 'Result', val: behavioralRound.starBreakdown.result }
-                  ].map((item, idx) => {
-                    const itemColor = getScoreColor(item.val)
-                    return (
-                      <div key={idx} className="p-3.5 rounded-xl border-2 border-black bg-white shadow-xs text-center">
-                        <span className="font-fragment text-[10px] font-bold text-stone-500 uppercase tracking-wider block mb-1">
-                          {item.label}
-                        </span>
-                        <span className="font-radio font-extrabold text-lg" style={{ color: itemColor }}>
-                          {item.val}
-                        </span>
-                        <div className="w-full h-1.5 bg-stone-200 rounded-full overflow-hidden mt-1.5">
-                          <div
-                            className="h-full rounded-full"
-                            style={{
-                              width: `${(item.val / 10) * 100}%`,
-                              backgroundColor: itemColor
-                            }}
-                          />
-                        </div>
-                      </div>
-                    )
-                  })}
+                <div className="p-5 rounded-2xl border-2 border-black bg-amber-50/60 shadow-xs flex items-start gap-3">
+                  <Award className="w-5 h-5 text-amber-700 shrink-0 mt-0.5" />
+                  <div>
+                    <h3 className="font-serif font-bold text-sm text-black mb-1">
+                      Key Area for Growth
+                    </h3>
+                    <p className="font-radio text-xs text-stone-800 leading-relaxed">
+                      {scorecard.suggested_improvement}
+                    </p>
+                  </div>
                 </div>
               </section>
             )}
-
-            {/* 5. EXPANDED AREAS TO IMPROVE */}
-            <section className="text-left">
-              <div className="pb-2 mb-4 border-b border-[#1A1A1A] flex items-center justify-between">
-                <h2 className="font-radio font-extrabold text-xs text-[#1A1A1A] uppercase tracking-widest">
-                  DETAILED ACTIONABLE RECOMMENDATIONS
-                </h2>
-                <span className="font-radio text-[11px] text-stone-400">
-                  Generated from your last 3 rounds
-                </span>
-              </div>
-
-              <div className="flex flex-col gap-4 font-radio text-xs text-stone-800 leading-relaxed">
-                <div className="p-4 rounded-xl border border-stone-300 bg-stone-50/50">
-                  <p className="font-bold text-sm text-black mb-1">
-                    1. Communication: Explain reasoning aloud, not just the final answer
-                  </p>
-                  <p className="text-stone-600">
-                    During technical coding questions, vocalize your thoughts while building the algorithm. Interviewers evaluate how you break down complex logic step-by-step before committing to code.
-                  </p>
-                </div>
-
-                <div className="p-4 rounded-xl border border-stone-300 bg-stone-50/50">
-                  <p className="font-bold text-sm text-black mb-1">
-                    2. Technical Depth: System design fundamentals
-                  </p>
-                  <p className="text-stone-600">
-                    Strengthen core concepts in distributed caching strategies, load balancer tradeoffs, and database indexing rules under high concurrency.
-                  </p>
-                </div>
-
-                <div className="p-4 rounded-xl border border-stone-300 bg-stone-50/50">
-                  <p className="font-bold text-sm text-black mb-1">
-                    3. Pacing: Quantitative reasoning under time pressure
-                  </p>
-                  <p className="text-stone-600">
-                    Structure Fermi estimation and market sizing problems into explicit formulas before computing numerical values to avoid arithmetic bottlenecks.
-                  </p>
-                </div>
-              </div>
-            </section>
           </motion.div>
         </div>
       </main>

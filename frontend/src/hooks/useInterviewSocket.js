@@ -1,53 +1,120 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
+import { MicVAD } from '@ricky0123/vad-web';
 
-const WS_URL = 'ws://localhost:5001';
+const WS_URL = 'ws://localhost:5050';
 
 /**
- * Hands-Free Real-Time Voice Agent Hook
- * Architectural Fixes Applied:
- * 1. Strict WebSocket Cleanup: prevents React StrictMode double connection & duplicate greetings
- * 2. Mic "Aborted" Loop Guard: isMicStartingRef guard + 1000ms delay on 'aborted' error
- * 3. Non-Destructive Barge-In: audio.pause() without killing SpeechRecognition
+ * Ultra Low-Latency Hands-Free Real-Time Voice Agent Hook
+ * Features:
+ * 1. Infinite Auto-Restart Speech Recognition Loop (Prevents Mic Silence Death)
+ * 2. 20-Second WebSocket Keep-Alive Ping/Pong & Auto-Reconnect
+ * 3. UI State Lock Reset on Socket Close/Error
+ * 4. Safe Base64 Audio Decoding & Single High-Quality Neural Audio Block Handling
  */
-export function useInterviewSocket(resumeText = '', candidateName = 'Manik') {
+export function useInterviewSocket(resumeText = '', candidateName = 'Manik', resumeCandidateName = '', enabled = true) {
+  // Normalize arguments if 3rd arg is boolean (enabled)
+  let actualResumeCandidateName = resumeCandidateName;
+  let actualEnabled = enabled;
+  if (typeof resumeCandidateName === 'boolean') {
+    actualEnabled = resumeCandidateName;
+    actualResumeCandidateName = '';
+  }
+
   const [aiText, setAiText] = useState('');
-  const [status, setStatus] = useState('connecting'); // connecting | listening | ai_thinking | ai_speaking | error
+  const [status, setStatus] = useState(actualEnabled ? 'connecting' : 'idle'); // idle | connecting | listening | ai_thinking | ai_speaking | error
   const [isConnected, setIsConnected] = useState(false);
   const [transcript, setTranscript] = useState('');
+  const [fullTranscript, setFullTranscript] = useState([]);
 
   // Persistent Refs
+  const fullTranscriptRef = useRef([]);
   const socketRef = useRef(null);
   const audioRef = useRef(null);
   const audioQueueRef = useRef([]);
   const recognitionRef = useRef(null);
   const reconnectTimeoutRef = useRef(null);
+  const pingIntervalRef = useRef(null);
   const streamRef = useRef(null);
   const vadIntervalRef = useRef(null);
+  const vadInstanceRef = useRef(null);
   const silenceTimerRef = useRef(null);
+  const hasReceivedAudioRef = useRef(false);
 
-  // Buffer for accumulated user transcript
+  // Buffer for accumulated user transcript & latest AI text ref
   const transcriptBufferRef = useRef('');
+  const aiTextRef = useRef('');
+
+  // Context refs for WebSocket
+  const candidateNameRef = useRef(candidateName || 'Manik');
+  const resumeCandidateNameRef = useRef(actualResumeCandidateName || '');
+  const resumeTextRef = useRef(resumeText || '');
+  candidateNameRef.current = candidateName || 'Manik';
+  resumeCandidateNameRef.current = actualResumeCandidateName || '';
+  resumeTextRef.current = resumeText || '';
 
   // Flags
   const isAiSpeakingRef = useRef(false);
   const isUserSpeakingRef = useRef(false);
   const isRecordingRef = useRef(true);
-  const isMicStartingRef = useRef(false); // FIX 2: Prevents mic collision loops
+  const isMicStartingRef = useRef(false);
   const mountedRef = useRef(true);
 
-  // ── FIX 3: Non-Destructive Barge-In (Pause audio only, do not kill STT) ──
+  // Sync aiTextRef
+  useEffect(() => {
+    aiTextRef.current = aiText;
+  }, [aiText]);
+
+  // ── Helper to Safely Start Speech Recognition ──
+  const safeStartRecognition = useCallback(() => {
+    if (!recognitionRef.current || !mountedRef.current || !isRecordingRef.current) return;
+    if (isMicStartingRef.current) return;
+
+    try {
+      isMicStartingRef.current = true;
+      recognitionRef.current.start();
+      console.log('🎙️ Calling recognition.start()...');
+    } catch (e) {
+      isMicStartingRef.current = false;
+    }
+  }, []);
+
+  // ── Instant Conversational Thinking Fillers ──
+  const playInstantFiller = useCallback(() => {
+    if (!('speechSynthesis' in window)) return;
+    const fillers = ["Hmm...", "Let me see...", "Got it...", "Right..."];
+    const randomFiller = fillers[Math.floor(Math.random() * fillers.length)];
+    try {
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(randomFiller);
+      utterance.rate = 1.25;
+      utterance.pitch = 1.0;
+      utterance.lang = 'en-US';
+      window.speechSynthesis.speak(utterance);
+    } catch (e) {
+      // ignore
+    }
+  }, []);
+
+  // ── Instant Audio Killswitch Barge-In ──
   const stopAudio = useCallback(() => {
+    audioQueueRef.current = [];
+
     if (audioRef.current) {
       try {
-        console.log('🔇 [Barge-In] Pausing AI audio output');
+        console.log('🔇 [Instant Killswitch] Nuking AI audio player and clearing decoder buffer');
         audioRef.current.pause();
-        audioRef.current.currentTime = 0;
+        audioRef.current.removeAttribute('src');
+        audioRef.current.load();
       } catch (e) {
         // ignore
       }
       audioRef.current = null;
     }
-    audioQueueRef.current = [];
+
+    if ('speechSynthesis' in window) {
+      try { window.speechSynthesis.cancel(); } catch (e) {}
+    }
+
     isAiSpeakingRef.current = false;
     setStatus('listening');
   }, []);
@@ -58,169 +125,288 @@ export function useInterviewSocket(resumeText = '', candidateName = 'Manik') {
 
     if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
       const payload = { type: 'interrupt' };
-      console.log('⬆️ Sending payload to server:', payload);
-      socketRef.current.send(JSON.stringify(payload));
+      console.log('⬆️ Sending interrupt payload to server');
+      try {
+        socketRef.current.send(JSON.stringify(payload));
+      } catch (e) {
+        // ignore
+      }
     }
   }, [stopAudio]);
 
-  // ── Send User Speech Payload over WebSocket ──
-  const sendUserSpeech = useCallback((textToSend) => {
-    const trimmed = textToSend.trim();
-    if (!trimmed || !socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) {
+  // Transcript entry logger
+  const addTranscriptEntry = useCallback((role, content) => {
+    const entry = { role, content };
+    fullTranscriptRef.current = [...fullTranscriptRef.current, entry];
+    setFullTranscript(fullTranscriptRef.current);
+  }, []);
+
+  // ── Browser SpeechSynthesis Fallback ──
+  const speakTextFallback = useCallback((text) => {
+    const textToSpeak = text || aiTextRef.current;
+    if (!('speechSynthesis' in window) || !textToSpeak) {
+      setStatus('listening');
       return;
     }
+    try {
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(textToSpeak);
+      utterance.rate = 1.0;
+      utterance.pitch = 1.0;
+      utterance.lang = 'en-US';
 
-    const payload = {
-      type: 'user_speech',
-      userMessage: trimmed,
-      resumeText,
-      candidateName
-    };
+      const voices = window.speechSynthesis.getVoices();
+      const preferredVoice = voices.find(v => v.lang.startsWith('en') && (v.name.includes('Google') || v.name.includes('Natural') || v.name.includes('Samantha') || v.name.includes('Alex')));
+      if (preferredVoice) {
+        utterance.voice = preferredVoice;
+      }
 
-    console.log('⬆️ Sending payload to server:', payload);
-    setStatus('ai_thinking');
-    setTranscript('');
-    transcriptBufferRef.current = '';
+      utterance.onstart = () => {
+        isAiSpeakingRef.current = true;
+        setStatus('ai_speaking');
+        // Mute mic & flush transcript buffer
+        transcriptBufferRef.current = '';
+        setTranscript('');
+        if (silenceTimerRef.current) {
+          clearTimeout(silenceTimerRef.current);
+          silenceTimerRef.current = null;
+        }
+        if (recognitionRef.current) {
+          try { recognitionRef.current.abort(); } catch (e) {}
+        }
+      };
 
-    socketRef.current.send(JSON.stringify(payload));
-  }, [resumeText, candidateName]);
+      const handleFallbackAudioEnd = () => {
+        transcriptBufferRef.current = '';
+        setTranscript('');
+        // 300ms grace window to prevent speaker echo pickup
+        setTimeout(() => {
+          if (!mountedRef.current) return;
+          isAiSpeakingRef.current = false;
+          transcriptBufferRef.current = '';
+          setTranscript('');
+          setStatus('listening');
+          safeStartRecognition();
+        }, 300);
+      };
+
+      utterance.onend = handleFallbackAudioEnd;
+      utterance.onerror = handleFallbackAudioEnd;
+
+      isAiSpeakingRef.current = true;
+      setStatus('ai_speaking');
+      window.speechSynthesis.speak(utterance);
+    } catch (err) {
+      console.warn('SpeechSynthesis exception:', err);
+      isAiSpeakingRef.current = false;
+      setStatus('listening');
+    }
+  }, [safeStartRecognition]);
 
   // ── Audio Queue System ──
   const playNextInQueue = useCallback(() => {
     if (audioQueueRef.current.length === 0) {
-      isAiSpeakingRef.current = false;
-      setStatus('listening');
+      // 300ms grace window to let speaker audio finish echoing into room
+      setTimeout(() => {
+        if (!mountedRef.current) return;
+        isAiSpeakingRef.current = false;
+        transcriptBufferRef.current = '';
+        setTranscript('');
+        setStatus('listening');
+        safeStartRecognition();
+      }, 300);
       return;
     }
 
     isAiSpeakingRef.current = true;
     setStatus('ai_speaking');
+
+    // Flush buffer & cancel any pending silence timers
+    transcriptBufferRef.current = '';
+    setTranscript('');
+    if (silenceTimerRef.current) {
+      clearTimeout(silenceTimerRef.current);
+      silenceTimerRef.current = null;
+    }
+
+    // Abort speech recognition so it stops listening while AI speaks
+    if (recognitionRef.current) {
+      try { recognitionRef.current.abort(); } catch (e) {}
+    }
+
     const base64 = audioQueueRef.current.shift();
 
+    if (!base64 || typeof base64 !== 'string') {
+      playNextInQueue();
+      return;
+    }
+
     try {
-      const audio = new Audio(`data:audio/mpeg;base64,${base64}`);
+      const byteCharacters = atob(base64);
+      const byteNumbers = new Array(byteCharacters.length);
+      for (let i = 0; i < byteCharacters.length; i++) {
+        byteNumbers[i] = byteCharacters.charCodeAt(i);
+      }
+      const byteArray = new Uint8Array(byteNumbers);
+      const blob = new Blob([byteArray], { type: 'audio/mp3' });
+      const audioUrl = URL.createObjectURL(blob);
+
+      const audio = new Audio(audioUrl);
       audioRef.current = audio;
 
       audio.onplay = () => {
         isAiSpeakingRef.current = true;
-        console.log('🔊 AI Audio playing...');
+        console.log('🔊 Playing Neural audio payload...');
       };
 
-      audio.onended = () => {
-        console.log('🔊 AI Audio ended.');
+      const handleAudioEnd = () => {
+        URL.revokeObjectURL(audioUrl);
         audioRef.current = null;
-        isAiSpeakingRef.current = false;
-        playNextInQueue();
+        transcriptBufferRef.current = '';
+        setTranscript('');
+
+        // 300ms grace window before enabling mic again
+        setTimeout(() => {
+          if (!mountedRef.current) return;
+          if (audioQueueRef.current.length === 0) {
+            isAiSpeakingRef.current = false;
+            transcriptBufferRef.current = '';
+            setTranscript('');
+            setStatus('listening');
+            safeStartRecognition();
+          } else {
+            playNextInQueue();
+          }
+        }, 300);
       };
 
+      audio.onended = handleAudioEnd;
       audio.onerror = (e) => {
-        console.error('🔊 AI Audio error:', e);
-        audioRef.current = null;
-        isAiSpeakingRef.current = false;
-        playNextInQueue();
+        console.error('🔊 Neural audio error. Skipping chunk:', e);
+        handleAudioEnd();
       };
 
       audio.play().catch((err) => {
-        console.warn('🔊 Audio play prevented:', err);
-        audioRef.current = null;
-        isAiSpeakingRef.current = false;
-        playNextInQueue();
+        console.warn('🔊 Audio play blocked or failed. Skipping chunk:', err);
+        handleAudioEnd();
       });
     } catch (e) {
-      console.warn('Audio init exception:', e);
+      console.warn('Audio base64 decoding exception, skipping chunk:', e);
+      audioRef.current = null;
       isAiSpeakingRef.current = false;
       playNextInQueue();
     }
-  }, []);
+  }, [safeStartRecognition]);
 
   const enqueueAudio = useCallback((base64Data) => {
+    if (!base64Data) return;
     audioQueueRef.current.push(base64Data);
     if (!isAiSpeakingRef.current && !audioRef.current) {
       playNextInQueue();
     }
   }, [playNextInQueue]);
 
-  // ── VAD (Volume RMS Calculation via Web Audio API) ──
-  const setupVAD = useCallback((stream) => {
-    try {
-      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-      const audioContext = new AudioContextClass();
-      const source = audioContext.createMediaStreamSource(stream);
-      const analyser = audioContext.createAnalyser();
-      analyser.fftSize = 512;
-      analyser.smoothingTimeConstant = 0.8;
-      source.connect(analyser);
-
-      const dataArray = new Uint8Array(analyser.frequencyBinCount);
-      const RMS_THRESHOLD = 20;
-      const SILENCE_DURATION_MS = 1500;
-
-      vadIntervalRef.current = setInterval(() => {
-        if (!mountedRef.current) return;
-
-        analyser.getByteFrequencyData(dataArray);
-
-        let sum = 0;
-        for (let i = 0; i < dataArray.length; i++) {
-          sum += dataArray[i] * dataArray[i];
-        }
-        const rms = Math.sqrt(sum / dataArray.length);
-
-        if (rms > RMS_THRESHOLD) {
-          if (!isUserSpeakingRef.current) {
-            isUserSpeakingRef.current = true;
-            console.log('🗣️ User started speaking (barge-in triggered), RMS:', Math.round(rms));
-
-            if (isAiSpeakingRef.current) {
-              sendInterrupt();
-            }
-
-            setStatus('listening');
-          }
-
-          if (silenceTimerRef.current) {
-            clearTimeout(silenceTimerRef.current);
-            silenceTimerRef.current = null;
-          }
-        } else {
-          if (isUserSpeakingRef.current && !silenceTimerRef.current) {
-            silenceTimerRef.current = setTimeout(() => {
-              isUserSpeakingRef.current = false;
-              silenceTimerRef.current = null;
-              console.log('🎤 [VAD] 1.5s Silence detected. Flushing user transcript buffer...');
-
-              const finalSpeech = transcriptBufferRef.current.trim();
-              if (finalSpeech.length > 0) {
-                sendUserSpeech(finalSpeech);
-              }
-            }, SILENCE_DURATION_MS);
-          }
-        }
-      }, 100);
-    } catch (err) {
-      console.warn('VAD setup error:', err);
-    }
-  }, [sendInterrupt, sendUserSpeech]);
-
-  // ── Helper to Safely Start Speech Recognition ──
-  const safeStartRecognition = useCallback(() => {
-    if (!recognitionRef.current || !mountedRef.current || !isRecordingRef.current) return;
-    if (isMicStartingRef.current) {
-      console.log('⏸️ [Mic Guard] Recognition start already in progress. Skipping...');
+  // ── Send User Speech Payload ──
+  const sendUserSpeech = useCallback((textToSend) => {
+    const trimmed = textToSend.trim();
+    if (!trimmed || !socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) {
       return;
     }
 
-    try {
-      isMicStartingRef.current = true;
-      recognitionRef.current.start();
-      console.log('🎙️ Calling recognition.start()...');
-    } catch (e) {
-      isMicStartingRef.current = false;
-      console.warn('SpeechRecognition start call exception:', e.message);
-    }
-  }, []);
+    playInstantFiller();
+    addTranscriptEntry('user', trimmed);
 
-  // ── FIX 2: Speech Recognition with Aborted Error Loop Protection & Ref Guards ──
+    const payload = {
+      type: 'user_speech',
+      userMessage: trimmed,
+      resumeText: resumeTextRef.current,
+      candidateName: candidateNameRef.current,
+      resumeCandidateName: resumeCandidateNameRef.current
+    };
+
+    console.log('⬆️ Sending user speech payload to server:', payload);
+    setStatus('ai_thinking');
+    setTranscript('');
+    transcriptBufferRef.current = '';
+
+    try {
+      socketRef.current.send(JSON.stringify(payload));
+    } catch (e) {
+      console.error('Failed to send user speech over socket:', e);
+    }
+  }, [playInstantFiller, addTranscriptEntry]);
+
+  // ── Silero Neural VAD + RMS Fallback ──
+  const setupVAD = useCallback(async (stream) => {
+    try {
+      console.log('🧠 Initializing Silero Neural VAD (@ricky0123/vad-web)...');
+      const myVad = await MicVAD.new({
+        onSpeechStart: () => {
+          console.log('🗣️ [Silero Neural VAD] User speech start detected!');
+          isUserSpeakingRef.current = true;
+          if (isAiSpeakingRef.current) {
+            console.log('⚡ [Barge-In] Interrupting AI playback instantly on speech start');
+            sendInterrupt();
+          }
+          setStatus('listening');
+        },
+        onSpeechEnd: () => {
+          console.log('🗣️ [Silero Neural VAD] User speech end detected');
+          isUserSpeakingRef.current = false;
+        },
+        onVADFrameLoaded: () => {
+          console.log('🎙️ [Silero Neural VAD] Model loaded & active');
+        }
+      });
+      vadInstanceRef.current = myVad;
+      myVad.start();
+    } catch (err) {
+      console.warn('Silero VAD initialization notice, using audio analyzer fallback:', err.message);
+      try {
+        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+        const audioContext = new AudioContextClass();
+        const source = audioContext.createMediaStreamSource(stream);
+        const analyser = audioContext.createAnalyser();
+        analyser.fftSize = 512;
+        analyser.smoothingTimeConstant = 0.8;
+        source.connect(analyser);
+
+        const dataArray = new Uint8Array(analyser.frequencyBinCount);
+        const RMS_THRESHOLD = 35;
+
+        vadIntervalRef.current = setInterval(() => {
+          if (!mountedRef.current) return;
+
+          analyser.getByteFrequencyData(dataArray);
+
+          let sum = 0;
+          for (let i = 0; i < dataArray.length; i++) {
+            sum += dataArray[i] * dataArray[i];
+          }
+          const rms = Math.sqrt(sum / dataArray.length);
+
+          if (rms > RMS_THRESHOLD) {
+            if (!isUserSpeakingRef.current) {
+              isUserSpeakingRef.current = true;
+              console.log('🗣️ User VAD activity detected, RMS:', Math.round(rms));
+
+              if (isAiSpeakingRef.current) {
+                sendInterrupt();
+              }
+
+              setStatus('listening');
+            }
+          } else {
+            isUserSpeakingRef.current = false;
+          }
+        }, 100);
+      } catch (e) {
+        console.warn('VAD setup error:', e);
+      }
+    }
+  }, [sendInterrupt]);
+
+  // ── Speech Recognition Auto-Restart Loop ──
   const setupSpeechRecognition = useCallback(() => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) {
@@ -228,7 +414,6 @@ export function useInterviewSocket(resumeText = '', candidateName = 'Manik') {
       return;
     }
 
-    // If an instance already exists, don't recreate it
     if (recognitionRef.current) {
       safeStartRecognition();
       return;
@@ -240,27 +425,15 @@ export function useInterviewSocket(resumeText = '', candidateName = 'Manik') {
     recognition.lang = 'en-US';
 
     recognition.onstart = () => {
-      isMicStartingRef.current = false; // Reset flag on successful start
+      isMicStartingRef.current = false;
       console.log('🎙️ Mic started listening');
     };
 
-    recognition.onspeechstart = () => {
-      console.log('🗣️ User started speaking (onspeechstart)');
-      if (isAiSpeakingRef.current) {
-        sendInterrupt();
-      }
-    };
-
-    recognition.onsoundstart = () => {
-      if (isAiSpeakingRef.current) {
-        sendInterrupt();
-      }
-    };
-
     recognition.onresult = (event) => {
-      // Ignore self-echo if AI is actively playing audio
+      // 🔇 Audio Loop Defense: Ignore any input picked up while AI audio is active
       if (isAiSpeakingRef.current) {
-        console.log('🔇 AI speaking — ignoring self-echo transcript.');
+        console.log('🔇 [Audio Loop Defense] Ignoring speech recognition result during AI audio playback.');
+        transcriptBufferRef.current = '';
         return;
       }
 
@@ -275,34 +448,43 @@ export function useInterviewSocket(resumeText = '', candidateName = 'Manik') {
       }
 
       const trimmed = currentTranscript.trim();
-      if (trimmed) {
+      // Ignore phantom noise: require at least 3 characters for barge-in interrupt or submission
+      if (trimmed.length >= 3) {
         const lastSnippet = event.results[event.results.length - 1][0].transcript;
         console.log('📝 Transcript received:', lastSnippet, isFinalResult ? '(FINAL)' : '(INTERIM)');
         transcriptBufferRef.current = trimmed;
         setTranscript(trimmed);
+
+        if (silenceTimerRef.current) {
+          clearTimeout(silenceTimerRef.current);
+        }
+        silenceTimerRef.current = setTimeout(() => {
+          silenceTimerRef.current = null;
+          console.log('🎤 1.5s Silence detected after speech. Submitting transcript...');
+          const finalSpeech = transcriptBufferRef.current.trim();
+          if (finalSpeech.length >= 3) {
+            sendUserSpeech(finalSpeech);
+          }
+        }, 1500);
       }
     };
 
-    // FIX 2: Handle 'aborted' error without infinite loop
     recognition.onerror = (event) => {
       isMicStartingRef.current = false;
       console.error('🎙️ Mic error:', event.error);
 
-      if (event.error === 'aborted') {
-        console.warn('⏸️ [Mic Aborted] Delaying restart by 1000ms to clear audio buffers...');
-        if (mountedRef.current && isRecordingRef.current) {
-          setTimeout(() => {
-            if (mountedRef.current && isRecordingRef.current) {
-              safeStartRecognition();
-            }
-          }, 1000);
-        }
+      if (mountedRef.current && isRecordingRef.current) {
+        setTimeout(() => {
+          if (mountedRef.current && isRecordingRef.current) {
+            safeStartRecognition();
+          }
+        }, 800);
       }
     };
 
     recognition.onend = () => {
       isMicStartingRef.current = false;
-      console.log('🎙️ Mic stopped listening. Auto-restarting...');
+      console.log('🎙️ Mic stopped listening. Auto-restarting loop...');
 
       if (mountedRef.current && isRecordingRef.current) {
         setTimeout(() => {
@@ -315,23 +497,39 @@ export function useInterviewSocket(resumeText = '', candidateName = 'Manik') {
 
     recognitionRef.current = recognition;
     safeStartRecognition();
-  }, [sendInterrupt, safeStartRecognition]);
+  }, [sendInterrupt, safeStartRecognition, sendUserSpeech]);
 
-  // ── FIX 1: WebSocket Setup with Duplicate Connection Prevention & Strict Cleanup ──
+  // WebSocket message handler updates
+  const handleWsMessage = useCallback((data) => {
+    if (data.type === 'text' && data.content) {
+      setAiText(data.content);
+      aiTextRef.current = data.content;
+      addTranscriptEntry('assistant', data.content);
+      setStatus('ai_speaking');
+      hasReceivedAudioRef.current = false;
+
+      setTimeout(() => {
+        if (!hasReceivedAudioRef.current && mountedRef.current && isRecordingRef.current) {
+          console.log('🔊 Using zero-cost browser SpeechSynthesis fallback...');
+          speakTextFallback(data.content);
+        }
+      }, 600);
+    }
+  }, [addTranscriptEntry, speakTextFallback]);
+
+  // ── WebSocket Setup (20s Keep-Alive Ping & Auto-Reconnect) ──
   const connectWebSocket = useCallback(() => {
     if (!mountedRef.current) return;
 
-    // Prevent duplicate WebSockets in React Strict Mode
     if (socketRef.current) {
       const state = socketRef.current.readyState;
       if (state === WebSocket.OPEN || state === WebSocket.CONNECTING) {
-        console.log('⚡ [WS Guard] WebSocket already open/connecting. Skipping creation...');
         return;
       }
     }
 
     try {
-      console.log('⚡ Opening new WebSocket connection to:', WS_URL);
+      console.log('⚡ Opening WebSocket connection to:', WS_URL);
       const ws = new WebSocket(WS_URL);
       socketRef.current = ws;
 
@@ -340,14 +538,21 @@ export function useInterviewSocket(resumeText = '', candidateName = 'Manik') {
         setIsConnected(true);
         setStatus('ai_thinking');
 
+        // Start 20-second Keep-Alive Ping
+        if (pingIntervalRef.current) clearInterval(pingIntervalRef.current);
+        pingIntervalRef.current = setInterval(() => {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'ping' }));
+          }
+        }, 20000);
+
         const initPayload = {
           type: 'init_context',
-          candidateName,
-          resumeText
+          candidateName: candidateNameRef.current,
+          resumeCandidateName: resumeCandidateNameRef.current,
+          resumeText: resumeTextRef.current
         };
-        console.log('⬆️ Sending payload to server:', initPayload);
         ws.send(JSON.stringify(initPayload));
-
         setupSpeechRecognition();
       };
 
@@ -362,13 +567,22 @@ export function useInterviewSocket(resumeText = '', candidateName = 'Manik') {
             return;
           }
 
-          if (data.type === 'text' && data.content) {
-            setAiText(data.content);
+          if (data.type === 'text_chunk' && data.content) {
+            if (data.fullText) {
+              setAiText(data.fullText);
+              aiTextRef.current = data.fullText;
+            }
             setStatus('ai_speaking');
           }
 
-          if (data.type === 'audio' && data.audioBase64) {
-            enqueueAudio(data.audioBase64);
+          if (data.type === 'text' && data.content) {
+            handleWsMessage(data);
+          }
+
+          const audioPayload = data.audioBase64 || data.audioContent;
+          if ((data.type === 'audio_chunk' || data.type === 'audio') && audioPayload) {
+            hasReceivedAudioRef.current = true;
+            enqueueAudio(audioPayload);
           }
 
           if (data.type === 'error') {
@@ -383,6 +597,14 @@ export function useInterviewSocket(resumeText = '', candidateName = 'Manik') {
       ws.onclose = (event) => {
         console.warn('⚡ WebSocket closed (code:', event.code, ').');
         setIsConnected(false);
+        isAiSpeakingRef.current = false;
+        isUserSpeakingRef.current = false;
+        audioQueueRef.current = [];
+
+        if (pingIntervalRef.current) {
+          clearInterval(pingIntervalRef.current);
+          pingIntervalRef.current = null;
+        }
 
         if (mountedRef.current && isRecordingRef.current) {
           setStatus('connecting');
@@ -400,6 +622,9 @@ export function useInterviewSocket(resumeText = '', candidateName = 'Manik') {
       ws.onerror = (err) => {
         console.warn('⚡ WebSocket error:', err);
         setIsConnected(false);
+        isAiSpeakingRef.current = false;
+        isUserSpeakingRef.current = false;
+        setStatus('error');
       };
     } catch (err) {
       console.error('WebSocket setup error:', err);
@@ -410,16 +635,27 @@ export function useInterviewSocket(resumeText = '', candidateName = 'Manik') {
         }, 3000);
       }
     }
-  }, [candidateName, resumeText, setupSpeechRecognition, enqueueAudio]);
+  }, [setupSpeechRecognition, enqueueAudio, handleWsMessage, speakTextFallback]);
 
-  // ── Main Effect with Strict Cleanup ──
+  // ── Main Effect (Runs when enabled is true) ──
   useEffect(() => {
+    if (!enabled) {
+      setStatus('idle');
+      return;
+    }
+
     mountedRef.current = true;
     isRecordingRef.current = true;
 
     const init = async () => {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true
+          }
+        });
         streamRef.current = stream;
 
         if (!mountedRef.current) return;
@@ -434,23 +670,25 @@ export function useInterviewSocket(resumeText = '', candidateName = 'Manik') {
 
     init();
 
-    // Strict Mode / Component Unmount Cleanup
     return () => {
       mountedRef.current = false;
       isRecordingRef.current = false;
 
       if (vadIntervalRef.current) clearInterval(vadIntervalRef.current);
+      if (vadInstanceRef.current) {
+        try { vadInstanceRef.current.destroy(); } catch (e) {}
+        vadInstanceRef.current = null;
+      }
       if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
       if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
+      if (pingIntervalRef.current) clearInterval(pingIntervalRef.current);
 
       stopAudio();
 
       if (recognitionRef.current) {
         try {
           recognitionRef.current.stop();
-        } catch (e) {
-          // ignore
-        }
+        } catch (e) {}
         recognitionRef.current = null;
       }
 
@@ -458,29 +696,41 @@ export function useInterviewSocket(resumeText = '', candidateName = 'Manik') {
         streamRef.current.getTracks().forEach((t) => t.stop());
       }
 
-      // FIX 1: Explicitly close WebSocket on unmount to prevent zombie duplicate connections
       if (socketRef.current) {
         console.log('⚡ [Cleanup] Closing WebSocket on unmount.');
         socketRef.current.close();
         socketRef.current = null;
       }
     };
-  }, [setupVAD, connectWebSocket, stopAudio]);
+  }, [enabled, setupVAD, connectWebSocket, stopAudio]);
 
   const endSession = useCallback(() => {
     isRecordingRef.current = false;
+    mountedRef.current = false;
     stopAudio();
+
+    if (vadIntervalRef.current) clearInterval(vadIntervalRef.current);
+    if (vadInstanceRef.current) {
+      try { vadInstanceRef.current.destroy(); } catch (e) {}
+      vadInstanceRef.current = null;
+    }
+    if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+    if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
+    if (pingIntervalRef.current) clearInterval(pingIntervalRef.current);
 
     if (recognitionRef.current) {
       try { recognitionRef.current.stop(); } catch (e) {}
       recognitionRef.current = null;
     }
+    if (streamRef.current) {
+      try { streamRef.current.getTracks().forEach((t) => t.stop()); } catch (e) {}
+    }
     if (socketRef.current) {
-      socketRef.current.close();
+      try { socketRef.current.close(); } catch (e) {}
       socketRef.current = null;
     }
     setIsConnected(false);
-    setStatus('connecting');
+    setStatus('idle');
   }, [stopAudio]);
 
   return {
@@ -488,7 +738,10 @@ export function useInterviewSocket(resumeText = '', candidateName = 'Manik') {
     status,
     isConnected,
     transcript,
+    fullTranscript,
+    fullTranscriptRef,
     sendInterrupt,
     endSession
   };
 }
+

@@ -275,10 +275,10 @@ export default function CreateInterview() {
                         </div>
                         <div className="text-left">
                           <p className="font-bold text-sm text-black leading-tight">
-                            {file.name}
+                            {file?.name}
                           </p>
                           <p className="text-xs text-stone-400">
-                            {file.size}
+                            {file?.size}
                           </p>
                         </div>
                       </div>
