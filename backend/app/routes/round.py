@@ -42,6 +42,14 @@ DEFAULT_BEHAVIORAL_QUESTIONS = [
     "Give an example of how you set goals and achieved them under high pressure."
 ]
 
+TECHNICAL_TIME_LIMITS = {
+    "easy": 10 * 60,     # 600 seconds
+    "medium": 25 * 60,   # 1500 seconds
+    "hard": 45 * 60      # 2700 seconds
+}
+
+APTITUDE_TOTAL_TIME_LIMIT = 15 * 60 # 900 seconds (15 minutes)
+
 @router.post("/start", response_model=RoundStartResponse)
 def start_round(
     payload: RoundStartRequest,
@@ -70,63 +78,111 @@ def start_round(
         round_id = round_record["id"]
         
         questions_to_insert = []
+        total_time_limit = None
         
         # 3. Fetch/Generate questions based on type
         if payload.roundType == "technical":
-            # Fetch from technical_questions table (filtering by position)
+            # Fetch from technical_questions table (role-specific filtering)
             db_q = client.table("technical_questions").select("*").eq("position", position).execute()
             q_list = db_q.data if db_q.data else []
-                
-            # Fallback to static default mock questions if table is empty
+
+            # Fallback: search for partial position match if exact position yields empty
             if len(q_list) == 0:
-                q_list = DEFAULT_TECHNICAL_QUESTIONS
-                
-            # Pick up to 10 questions (or all available if less)
+                all_tech = client.table("technical_questions").select("*").execute()
+                all_qs = all_tech.data if all_tech.data else []
+                q_list = [q for q in all_qs if position.lower() in q.get("position", "").lower() or q.get("position", "").lower() in position.lower()]
+                if len(q_list) == 0:
+                    q_list = all_qs if len(all_qs) > 0 else DEFAULT_TECHNICAL_QUESTIONS
+
             selected_qs = q_list[:10]
+            diff_cycle = ["easy", "medium", "hard"]
+
             for idx, q in enumerate(selected_qs):
-                q_text = f"Difficulty: {q.get('difficulty', 'Medium')} | {q.get('question', '')}"
-                questions_to_insert.append({"round_id": round_id, "question_text": q_text})
-                
+                raw_diff = (q.get("difficulty") or diff_cycle[idx % len(diff_cycle)]).lower()
+                if raw_diff not in TECHNICAL_TIME_LIMITS:
+                    raw_diff = "medium"
+                time_sec = TECHNICAL_TIME_LIMITS[raw_diff]
+
+                # Format question text
+                q_title = q.get("question", "")
+                starter = q.get("starter_code", "")
+                q_text = f"[{raw_diff.upper()}] {q_title}"
+                if starter:
+                    q_text += f"\n\nStarter Code:\n{starter}"
+
+                questions_to_insert.append({
+                    "round_id": round_id,
+                    "question_text": q_text,
+                    "difficulty": raw_diff,
+                    "time_limit_seconds": time_sec,
+                    "starter_code": starter
+                })
+
         elif payload.roundType == "aptitude":
-            # Fetch from aptitude_questions table
-            db_q = client.table("aptitude_questions").select("*").eq("industry", industry).execute()
+            # Standardized 50-question pool — NOT role or industry specific!
+            db_q = client.table("aptitude_questions").select("*").execute()
             q_list = db_q.data if db_q.data else []
-            
+
             if len(q_list) == 0:
                 q_list = DEFAULT_APTITUDE_QUESTIONS
-                
-            # Shuffle and pick up to 10 questions
-            random.shuffle(q_list)
-            selected_qs = q_list[:10]
+
+            if len(q_list) < 50:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Fewer than 50 aptitude questions available in database"
+                )
+
+            total_time_limit = APTITUDE_TOTAL_TIME_LIMIT # 15 minutes (900 seconds)
+
+            # Pick exactly 50 questions
+            selected_qs = q_list[:50]
             for idx, q in enumerate(selected_qs):
                 options_str = f"A) {q.get('option_a', '')} | B) {q.get('option_b', '')} | C) {q.get('option_c', '')} | D) {q.get('option_d', '')}"
                 q_text = f"{q.get('question', '')} Options: {options_str}"
-                questions_to_insert.append({"round_id": round_id, "question_text": q_text})
+                questions_to_insert.append({
+                    "round_id": round_id,
+                    "question_text": q_text,
+                    "difficulty": "medium",
+                    "time_limit_seconds": 900
+                })
                 
         elif payload.roundType == "behavioral":
-            # Fetch resume text if available for AI generation context
-            resume_res = client.table("resumes").select("*").eq("user_id", user.id).execute()
-            resume_text = ""
-            if resume_res.data and len(resume_res.data) > 0:
-                resume_text = resume_res.data[0].get("extracted_text", "")
-            
-            # Simulate or call OpenAI to generate personalized behavioral questions
-            # For now, return standard behavioral questions
             for q_text in DEFAULT_BEHAVIORAL_QUESTIONS:
-                questions_to_insert.append({"round_id": round_id, "question_text": q_text})
+                questions_to_insert.append({
+                    "round_id": round_id,
+                    "question_text": q_text,
+                    "difficulty": "medium",
+                    "time_limit_seconds": 600
+                })
         else:
             raise HTTPException(status_code=400, detail="Invalid round type")
             
         # 4. Insert question records into 'questions' table
         inserted_qs = []
         for q_data in questions_to_insert:
-            q_res = client.table("questions").insert(q_data).execute()
+            # Strip extra non-DB keys if columns don't exist
+            db_insert_data = {
+                "round_id": q_data["round_id"],
+                "question_text": q_data["question_text"]
+            }
+            q_res = client.table("questions").insert(db_insert_data).execute()
             if q_res.data and len(q_res.data) > 0:
-                inserted_qs.append(q_res.data[0])
+                inserted_rec = q_res.data[0]
+                inserted_rec["difficulty"] = q_data.get("difficulty", "medium")
+                inserted_rec["time_limit_seconds"] = q_data.get("time_limit_seconds", 600)
+                inserted_rec["starter_code"] = q_data.get("starter_code", "")
+                inserted_qs.append(inserted_rec)
                 
         # 5. Format response
         questions_resp = [
-            QuestionResponse(id=q["id"], roundId=q["round_id"], questionText=q["question_text"])
+            QuestionResponse(
+                id=q["id"],
+                roundId=q["round_id"],
+                questionText=q["question_text"],
+                difficulty=q.get("difficulty", "medium"),
+                timeLimitSeconds=q.get("time_limit_seconds", 600),
+                starterCode=q.get("starter_code")
+            )
             for q in inserted_qs
         ]
         
@@ -134,7 +190,8 @@ def start_round(
             roundId=round_id,
             roundType=payload.roundType,
             status="in_progress",
-            questions=questions_resp
+            questions=questions_resp,
+            totalTimeLimitSeconds=total_time_limit
         )
         
     except HTTPException:
@@ -179,14 +236,21 @@ def submit_answer(
         score = int(round(grade["score"]))
         feedback = grade["feedback"]
         
-        # Save the answer record in 'answers' table
+        # Check if an answer for this question_id already exists (duplicate submission protection)
+        existing_ans = client.table("answers").select("*").eq("question_id", question_id).execute()
+
         answer_data = {
             "question_id": question_id,
             "answer_text": payload.answerText,
             "score": score,
             "feedback": feedback
         }
-        ans_res = client.table("answers").insert(answer_data).execute()
+
+        if existing_ans.data and len(existing_ans.data) > 0:
+            existing_id = existing_ans.data[0]["id"]
+            client.table("answers").update(answer_data).eq("id", existing_id).execute()
+        else:
+            client.table("answers").insert(answer_data).execute()
         
         # Check if all questions in this round have been answered
         all_qs_res = client.table("questions").select("id").eq("round_id", id).execute()
