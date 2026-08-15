@@ -2,7 +2,8 @@ import React, { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useNavigate, useLocation } from 'react-router-dom'
 import Editor from '@monaco-editor/react'
-import { ArrowLeft, Play, Pause, RotateCcw, CheckCircle2, ThumbsUp, ThumbsDown, MessageSquare, Moon, Sun, Timer, AlertCircle, Plus } from 'lucide-react'
+import { ArrowLeft, Play, Pause, RotateCcw, CheckCircle2, Moon, Sun, Timer, AlertCircle, Plus, VolumeX, Volume2, Mic, MicOff, Bookmark, Copy, Trash2, RefreshCw, Check, Lock, Sparkles } from 'lucide-react'
+import { supabase } from '../lib/supabase'
 
 const PROBLEMS = [
   {
@@ -174,6 +175,74 @@ int main() {
   }
 ]
 
+function generateStarterCodeForLanguage(starterPython, lang) {
+  if (!starterPython) {
+    if (lang === 'python') return 'class Solution:\n    def solve(self):\n        pass'
+    if (lang === 'javascript') return '/**\n * @return {void}\n */\nvar solve = function() {\n    \n};'
+    if (lang === 'java') return 'class Solution {\n    public void solve() {\n        \n    }\n}'
+    if (lang === 'cpp') return 'class Solution {\npublic:\n    void solve() {\n        \n    }\n};'
+  }
+
+  let cleanCode = starterPython.replace(/```python|```/g, '').trim()
+
+  if (lang === 'python') {
+    return cleanCode
+  }
+
+  if (lang === 'javascript') {
+    let js = cleanCode
+      .replace(/class\s+(\w+):/g, 'class $1 {')
+      .replace(/def\s+__init__\s*\(\s*self\s*,?\s*(.*?)\):/g, '  constructor($1) {')
+      .replace(/def\s+(\w+)\s*\(\s*self\s*,?\s*(.*?)\)\s*(->\s*[\w\[\]]+)?:/g, '  $1($2) {')
+      .replace(/:\s*list\[.*?\]/g, '')
+      .replace(/:\s*int/g, '')
+      .replace(/:\s*str/g, '')
+      .replace(/:\s*bool/g, '')
+      .replace(/pass/g, '    // Write your solution here')
+
+    if (!js.includes('}') && js.includes('class Solution')) {
+      js += '\n}'
+    }
+    return js
+  }
+
+  if (lang === 'java') {
+    let java = cleanCode
+      .replace(/class\s+(\w+):/g, 'public class $1 {')
+      .replace(/def\s+__init__\s*\(\s*self\s*,?\s*(.*?)\):/g, '    public $1($2) {')
+      .replace(/def\s+(\w+)\s*\(\s*self\s*,?\s*(.*?)\)\s*->\s*bool:/g, '    public boolean $1($2) {')
+      .replace(/def\s+(\w+)\s*\(\s*self\s*,?\s*(.*?)\)\s*->\s*int:/g, '    public int $1($2) {')
+      .replace(/def\s+(\w+)\s*\(\s*self\s*,?\s*(.*?)\)\s*->\s*list\[.*?\]:/g, '    public int[] $1($2) {')
+      .replace(/def\s+(\w+)\s*\(\s*self\s*,?\s*(.*?)\)\s*->\s*None:/g, '    public void $1($2) {')
+      .replace(/def\s+(\w+)\s*\(\s*self\s*,?\s*(.*?)\):/g, '    public Object $1($2) {')
+      .replace(/pass/g, '        // Write your solution here')
+
+    if (!java.includes('}') && java.includes('class Solution')) {
+      java += '\n}'
+    }
+    return java
+  }
+
+  if (lang === 'cpp') {
+    let cpp = cleanCode
+      .replace(/class\s+(\w+):/g, 'class $1 {\npublic:')
+      .replace(/def\s+__init__\s*\(\s*self\s*,?\s*(.*?)\):/g, '    $1($2) {')
+      .replace(/def\s+(\w+)\s*\(\s*self\s*,?\s*(.*?)\)\s*->\s*bool:/g, '    bool $1($2) {')
+      .replace(/def\s+(\w+)\s*\(\s*self\s*,?\s*(.*?)\)\s*->\s*int:/g, '    int $1($2) {')
+      .replace(/def\s+(\w+)\s*\(\s*self\s*,?\s*(.*?)\)\s*->\s*list\[.*?\]:/g, '    vector<int> $1($2) {')
+      .replace(/def\s+(\w+)\s*\(\s*self\s*,?\s*(.*?)\)\s*->\s*None:/g, '    void $1($2) {')
+      .replace(/def\s+(\w+)\s*\(\s*self\s*,?\s*(.*?)\):/g, '    void $1($2) {')
+      .replace(/pass/g, '        // Write your solution here')
+
+    if (!cpp.includes('};') && cpp.includes('class Solution')) {
+      cpp += '\n};'
+    }
+    return cpp
+  }
+
+  return cleanCode
+}
+
 export default function TechnicalRound() {
   const navigate = useNavigate()
   const location = useLocation()
@@ -198,6 +267,10 @@ export default function TechnicalRound() {
     const titleMatch = questionText.match(/^\[(.*?)\]\s*(.*)/)
     const displayTitle = titleMatch ? titleMatch[2].split('\n')[0] : questionText.split('\n')[0]
     
+    // Clean description to remove raw starter code text embedded in description if present
+    const cleanDesc = questionText.split('\n\nStarter Code:')[0]
+    const rawStarter = bq.starterCode || bq.starter_code || ''
+
     return {
       id: bq.id,
       questionId: bq.id,
@@ -205,13 +278,13 @@ export default function TechnicalRound() {
       difficulty: rawDiff.charAt(0).toUpperCase() + rawDiff.slice(1),
       timeLimitSeconds: timeLimitSec,
       recommendedTimeSeconds: timeLimitSec,
-      description: questionText,
+      description: cleanDesc,
       example: 'Refer to problem description for sample inputs.',
       starterCodes: {
-        javascript: bq.starterCode || `// Write your solution here\nfunction solve() {\n  \n}`,
-        python: `def solve():\n    pass`,
-        java: `public class Solution {\n    public static void solve() {\n        \n    }\n}`,
-        cpp: `void solve() {\n    \n}`
+        javascript: generateStarterCodeForLanguage(rawStarter, 'javascript'),
+        python: generateStarterCodeForLanguage(rawStarter, 'python'),
+        java: generateStarterCodeForLanguage(rawStarter, 'java'),
+        cpp: generateStarterCodeForLanguage(rawStarter, 'cpp')
       }
     }
   })
@@ -228,6 +301,10 @@ export default function TechnicalRound() {
   const [isSubmitted, setIsSubmitted] = useState(false)
   const [evalScore, setEvalScore] = useState(null)
   const [evalFeedback, setEvalFeedback] = useState('')
+  const [bookmarkedProblems, setBookmarkedProblems] = useState({})
+  const [submittedSolutions, setSubmittedSolutions] = useState({})
+  const [copiedToast, setCopiedToast] = useState(false)
+  const [showCompletionModal, setShowCompletionModal] = useState(false)
 
   // Timer State
   const [timeLeft, setTimeLeft] = useState(finalProblemsList[0].timeLimitSeconds || finalProblemsList[0].recommendedTimeSeconds)
@@ -422,7 +499,7 @@ export default function TechnicalRound() {
     }, 500)
   }
 
-  const handleSubmitSolution = async () => {
+  const handleSubmitSolution = async (openModal = false) => {
     if (isSubmitting) return
     setIsSubmitting(true)
     setIsSubmitted(false)
@@ -443,7 +520,8 @@ export default function TechnicalRound() {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          answerText: code || "// No answer submitted (Timeout)"
+          answerText: code || "// No answer submitted (Timeout)",
+          language: language
         })
       })
       
@@ -456,8 +534,13 @@ export default function TechnicalRound() {
       setEvalScore(data.score)
       setEvalFeedback(data.feedback)
       setIsSubmitted(true)
-      setIsTimerActive(false)
-      setOutput(`✓ Submission evaluated.\n\nScore: ${data.score}/10\nFeedback: ${data.feedback}`)
+      setSubmittedSolutions(prev => ({ ...prev, [qId]: true }))
+      setOutput(`✓ AI Evaluation Completed (${language.toUpperCase()})\n\nMarks / Score: ${data.score} / 10\n\n========================================\nEVALUATION & ERROR DESCRIPTION\n========================================\n${data.feedback}`)
+      
+      if (openModal) {
+        setIsTimerActive(false)
+        setShowCompletionModal(true)
+      }
     } catch (err) {
       console.error('Error submitting answer:', err)
       alert(`Submission failed: ${err.message}`)
@@ -467,111 +550,129 @@ export default function TechnicalRound() {
     }
   }
 
+  const handleSubmitAssessmentAll = async () => {
+    await handleSubmitSolution(true)
+  }
+
   return (
     <div className="min-h-screen bg-[#FAF7ED] text-black font-radio selection:bg-parker-red selection:text-white flex flex-col">
-      {/* Top Navbar Header */}
-      <header className="px-6 py-4 border-b border-stone-200 bg-[#FAF7ED] flex items-center justify-between">
-        <div className="flex items-center gap-4">
+      {/* Top Header Bar (Matching Aptitude Round Layout) */}
+      <header className="px-6 py-3.5 border-b border-stone-200 bg-[#FAF7ED] flex items-center justify-between sticky top-0 z-30 shadow-2xs">
+        <div className="flex items-center gap-3">
           <button
             onClick={() => navigate('/dashboard')}
-            className="flex items-center gap-1 text-sm font-bold text-stone-600 hover:text-black transition-colors cursor-pointer"
+            className="p-2 rounded-xl bg-white border border-stone-300 hover:bg-stone-100 text-stone-700 font-bold transition-all cursor-pointer shadow-2xs flex items-center gap-1.5 text-xs"
           >
             <ArrowLeft className="w-4 h-4" />
-            <span>Dashboard</span>
+            <span className="hidden sm:inline">Dashboard</span>
           </button>
-          <span className="text-stone-300">|</span>
-          <span className="font-serif italic font-bold text-xl text-parker-red">
-            InterviewOS
+
+          <span className="font-fragment text-xs font-extrabold tracking-widest text-stone-500 uppercase">
+            TECHNICAL CODING ROUND
+          </span>
+
+          <span className="text-xs font-radio font-extrabold px-3 py-1 bg-black text-white rounded-full hidden sm:inline-block">
+            Submitted: {Object.keys(submittedSolutions).length} / {finalProblemsList.length}
           </span>
         </div>
 
-        <div className="flex items-center gap-6 font-radio text-sm font-bold text-stone-600">
-          <button onClick={() => navigate('/dashboard')} className="hover:text-black transition-colors cursor-pointer">
-            Interview Start
-          </button>
-          <button onClick={() => navigate('/full-report')} className="hover:text-black transition-colors cursor-pointer">
-            Interview Prep
+        {/* Center: Question Numbers Scrollable Pill Track */}
+        <div className="flex items-center gap-1.5 overflow-x-auto max-w-[180px] sm:max-w-[340px] md:max-w-[460px] py-1 px-2 bg-stone-100/90 border border-stone-300 rounded-2xl no-scrollbar">
+          {finalProblemsList.map((prob, idx) => {
+            const pId = prob.questionId || prob.id
+            const isCurrent = (selectedProblem.questionId || selectedProblem.id) === pId
+            const isSubmittedProb = submittedSolutions[pId]
+            const isBookmarked = bookmarkedProblems[pId]
+
+            let style = 'bg-white text-stone-700 border border-stone-300 hover:bg-stone-200'
+            if (isCurrent) {
+              style = 'bg-black text-white shadow-xs font-bold scale-105'
+            } else if (isSubmittedProb) {
+              style = 'bg-emerald-600 text-white font-bold'
+            }
+
+            return (
+              <button
+                key={prob.id}
+                onClick={() => handleSelectProblem(prob)}
+                className={`w-7 h-7 sm:w-8 sm:h-8 shrink-0 rounded-full font-bold text-xs transition-all cursor-pointer flex items-center justify-center relative ${style}`}
+                title={isBookmarked ? "Bookmarked problem" : `Problem ${idx + 1}: ${prob.title}`}
+              >
+                {isBookmarked && <span className="absolute -top-1 -right-1 text-[10px]">⭐</span>}
+                {isSubmittedProb && !isCurrent ? '✓' : idx + 1}
+              </button>
+            )
+          })}
+        </div>
+
+        {/* Right Header: Timer & Submit Assessment Button */}
+        <div className="flex items-center gap-3">
+          <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border shadow-xs text-xs ${getTimerBadgeStyle()}`}>
+            <Timer className="w-3.5 h-3.5" />
+            <span className="font-mono tracking-wider">{formatTimer(timeLeft)}</span>
+          </div>
+
+          <button
+            onClick={() => handleSubmitAssessmentAll()}
+            className="bg-black hover:bg-stone-800 text-white font-radio font-bold text-xs px-4 py-2 rounded-xl transition-all cursor-pointer shadow-xs flex items-center gap-1.5"
+          >
+            <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+            <span className="hidden sm:inline">Submit Assessment</span>
+            <span className="sm:hidden">Submit</span>
           </button>
         </div>
       </header>
 
-      {/* Main Container */}
-      <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 flex flex-col gap-6">
-        {/* Title Header Bar & Interactive Interview Timer */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="text-left">
-            <h1 className="font-serif font-bold text-3xl text-black flex items-center gap-3">
-              <span>Technical Interview</span>
-              <span className="text-xs font-radio font-extrabold px-3 py-1 bg-amber-100 border border-amber-300 text-amber-900 rounded-full">
-                {selectedProblem.difficulty}
-              </span>
+      {/* Main Workspace Container */}
+      <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 flex flex-col gap-5">
+        {/* Un-cluttered Controls Strip: Problem Info + Language + Theme + Run */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white border border-stone-300 rounded-2xl p-3.5 shadow-2xs">
+          <div className="flex items-center gap-3 text-left">
+            <h1 className="font-serif font-bold text-xl text-black">
+              {selectedProblem.title}
             </h1>
-            <p className="text-sm text-stone-600">
-              Solve coding problems in VS Code Monaco Editor with AI Interviewer Voice & Speech Thinking.
-            </p>
+            <span className="text-xs font-radio font-extrabold px-2.5 py-0.5 bg-amber-100 border border-amber-300 text-amber-900 rounded-full">
+              {selectedProblem.difficulty}
+            </span>
+            <span className="text-xs font-mono font-semibold text-stone-500 hidden md:inline">
+              Target: {Math.floor(selectedProblem.recommendedTimeSeconds / 60)} Mins
+            </span>
           </div>
 
-          {/* Controls: Voice Buttons + Timer + Language Select + Theme Toggle + Run */}
-          <div className="flex flex-wrap items-center gap-3">
-            {/* AI Voice Read Aloud (TTS) */}
+          <div className="flex flex-wrap items-center gap-2">
+            {/* AI Voice Read Aloud */}
             <button
               onClick={handleToggleSpeakProblem}
-              className={`flex items-center gap-1.5 px-3 py-2 rounded-xl border-2 text-xs font-bold transition-all cursor-pointer shadow-xs ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold transition-all cursor-pointer shadow-2xs ${
                 isSpeaking
                   ? 'bg-amber-500 text-white border-amber-600 animate-pulse'
-                  : 'bg-white border-black text-black hover:bg-stone-100'
+                  : 'bg-white border-stone-300 text-stone-700 hover:bg-stone-100'
               }`}
               title="AI Interviewer Read Problem Aloud"
             >
-              {isSpeaking ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4 text-parker-red" />}
-              <span>{isSpeaking ? 'Stop Reading' : 'AI Voice Read'}</span>
+              {isSpeaking ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5 text-parker-red" />}
+              <span className="hidden md:inline">{isSpeaking ? 'Stop Reading' : 'AI Voice Read'}</span>
             </button>
 
-            {/* Candidate Voice Thinking Microphone (STT) */}
+            {/* Candidate Voice Microphone */}
             <button
               onClick={handleToggleMicrophone}
-              className={`flex items-center gap-1.5 px-3 py-2 rounded-xl border-2 text-xs font-bold transition-all cursor-pointer shadow-xs ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold transition-all cursor-pointer shadow-2xs ${
                 isListening
                   ? 'bg-red-500 text-white border-red-600 animate-pulse'
-                  : 'bg-white border-black text-black hover:bg-stone-100'
+                  : 'bg-white border-stone-300 text-stone-700 hover:bg-stone-100'
               }`}
               title="Vocalize Thought Process Out Loud"
             >
-              {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4 text-emerald-600" />}
-              <span>{isListening ? 'Recording...' : 'Explain Out Loud'}</span>
+              {isListening ? <MicOff className="w-3.5 h-3.5" /> : <Mic className="w-3.5 h-3.5 text-emerald-600" />}
+              <span className="hidden md:inline">{isListening ? 'Recording...' : 'Explain Out Loud'}</span>
             </button>
 
-            {/* Interactive Interview Timer Badge & Controls */}
-            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border-2 shadow-xs transition-all ${getTimerBadgeStyle()}`}>
-              <Timer className="w-4 h-4" />
-              <span className="font-mono text-sm tracking-wider">{formatTimer(timeLeft)}</span>
-
-              <button
-                onClick={() => setIsTimerActive(!isTimerActive)}
-                className="p-1 hover:bg-black/10 rounded transition-colors cursor-pointer ml-1"
-                title={isTimerActive ? "Pause Timer" : "Resume Timer"}
-              >
-                {isTimerActive ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5 fill-current" />}
-              </button>
-
-              <button
-                onClick={() => {
-                  setTimeLeft(selectedProblem.recommendedTimeSeconds)
-                  setIsTimerActive(true)
-                  setShowTimeUpModal(false)
-                }}
-                className="p-1 hover:bg-black/10 rounded transition-colors cursor-pointer"
-                title="Reset Timer"
-              >
-                <RotateCcw className="w-3.5 h-3.5" />
-              </button>
-            </div>
-
-            {/* Editor Theme Switcher */}
+            {/* Theme Toggle */}
             <button
               onClick={() => setEditorTheme(editorTheme === 'vs-dark' ? 'light' : 'vs-dark')}
-              className="p-2 rounded-xl bg-white border-2 border-black hover:bg-stone-100 text-stone-700 transition-all cursor-pointer shadow-xs"
-              title="Toggle Monaco Theme"
+              className="p-1.5 rounded-xl bg-white border border-stone-300 hover:bg-stone-100 text-stone-700 transition-all cursor-pointer shadow-2xs"
+              title="Toggle Editor Theme"
             >
               {editorTheme === 'vs-dark' ? <Sun className="w-4 h-4 text-amber-500" /> : <Moon className="w-4 h-4 text-stone-700" />}
             </button>
@@ -580,7 +681,7 @@ export default function TechnicalRound() {
             <select
               value={language}
               onChange={handleLanguageChange}
-              className="bg-white border-2 border-black rounded-xl px-3 py-2 text-sm font-bold text-black shadow-xs cursor-pointer focus:outline-none"
+              className="bg-white border border-stone-300 rounded-xl px-3 py-1.5 text-xs font-bold text-black shadow-2xs cursor-pointer focus:outline-none"
             >
               <option value="javascript">JavaScript (ES6)</option>
               <option value="python">Python 3</option>
@@ -592,50 +693,29 @@ export default function TechnicalRound() {
             <button
               onClick={handleRunCode}
               disabled={isRunning}
-              className="bg-[#8DAA87] hover:bg-[#7A9974] active:scale-95 text-white font-bold text-sm px-6 py-2 rounded-xl transition-all cursor-pointer shadow-xs flex items-center gap-2"
+              className="bg-[#8DAA87] hover:bg-[#7A9974] active:scale-95 text-white font-bold text-xs px-4 py-1.5 rounded-xl transition-all cursor-pointer shadow-2xs flex items-center gap-1.5"
             >
-              <Play className="w-4 h-4 fill-white" />
-              <span>{isRunning ? 'Running...' : 'Run'}</span>
+              <Play className="w-3.5 h-3.5 fill-white" />
+              <span>{isRunning ? 'Running...' : 'Run Code'}</span>
             </button>
           </div>
         </div>
 
-        {/* Problem Selector Tabs */}
-        <div className="flex items-center gap-2 border-b border-stone-300 pb-2">
-          {finalProblemsList.map((prob) => (
-            <button
-              key={prob.id}
-              onClick={() => handleSelectProblem(prob)}
-              className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
-                selectedProblem.id === prob.id
-                  ? 'bg-black text-white'
-                  : 'bg-stone-200/70 text-stone-700 hover:bg-stone-300/70'
-              }`}
-            >
-              <span>{prob.title}</span>
-              <span className="text-[10px] font-mono opacity-80">({Math.floor(prob.recommendedTimeSeconds / 60)}m)</span>
-            </button>
-          ))}
-        </div>
-
-        {/* Editor & Output 2-Column Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 flex-1 min-h-[520px]">
-          {/* Left Column: Problem Box + Monaco Code Editor (7 Columns) */}
-          <div className="lg:col-span-7 bg-[#FFFDF8] border border-stone-300 rounded-2xl p-5 flex flex-col gap-4 shadow-xs text-left">
-            {/* Problem Box */}
-            <div className="bg-[#FAF4E5] border border-amber-200/80 rounded-xl p-4 text-left relative">
+        {/* Editor & Output 2-Column Workspace Grid */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 flex-1 min-h-[520px]">
+          {/* Left Column: Problem Description & Monaco Editor (7 Cols) */}
+          <div className="lg:col-span-7 bg-[#FFFDF8] border border-stone-300 rounded-2xl p-4 flex flex-col gap-4 shadow-2xs text-left">
+            {/* Problem Details Box */}
+            <div className="bg-[#FAF4E5] border border-amber-200/80 rounded-xl p-3.5 text-left relative">
               <div className="flex items-center justify-between mb-1">
                 <span className="font-fragment text-[10px] font-bold text-stone-500 uppercase tracking-widest flex items-center gap-1.5">
                   PROBLEM STATEMENT
                   {isSpeaking && <span className="text-amber-600 font-bold animate-pulse">· 🔊 AI Speaking</span>}
                 </span>
-                <span className="font-mono text-[11px] font-bold text-stone-500">
-                  Target Time: {Math.floor(selectedProblem.recommendedTimeSeconds / 60)} Mins
+                <span className="font-mono text-[10px] font-bold text-stone-500">
+                  Target: {Math.floor(selectedProblem.recommendedTimeSeconds / 60)} Mins
                 </span>
               </div>
-              <h2 className="font-serif font-bold text-lg text-black mb-1">
-                {selectedProblem.title}
-              </h2>
               <p className="text-xs text-stone-700 leading-relaxed mb-2">
                 {selectedProblem.description}
               </p>
@@ -664,8 +744,8 @@ export default function TechnicalRound() {
               </motion.div>
             )}
 
-            {/* VS Code Monaco Editor Container */}
-            <div className="flex-1 border-2 border-black rounded-xl overflow-hidden shadow-xs min-h-[350px]">
+            {/* VS Code Monaco Editor */}
+            <div className="flex-1 border-2 border-black rounded-xl overflow-hidden shadow-2xs min-h-[350px]">
               <Editor
                 height="100%"
                 language={language}
@@ -688,8 +768,8 @@ export default function TechnicalRound() {
               />
             </div>
 
-            {/* Action Bar */}
-            <div className="flex items-center justify-between pt-2">
+            {/* Left Column Bottom Action Bar */}
+            <div className="flex items-center justify-between pt-1">
               <button
                 onClick={() => setCode(selectedProblem.starterCodes[language] || selectedProblem.starterCodes.javascript)}
                 className="flex items-center gap-1.5 text-xs font-bold text-stone-500 hover:text-black transition-colors cursor-pointer"
@@ -699,23 +779,23 @@ export default function TechnicalRound() {
               </button>
 
               <button
-                onClick={handleSubmitSolution}
+                onClick={() => handleSubmitSolution(false)}
                 className="bg-black hover:bg-stone-800 text-white font-bold text-xs px-5 py-2.5 rounded-xl transition-all cursor-pointer shadow-xs flex items-center gap-1.5"
               >
                 <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                <span>Submit Solution</span>
+                <span>Lock / Submit Problem Solution</span>
               </button>
             </div>
           </div>
 
-          {/* Right Column: Output Box (5 Columns) */}
-          <div className="lg:col-span-5 bg-[#FAF4E5] border border-stone-300 rounded-2xl p-5 flex flex-col shadow-xs text-left">
-            <span className="font-fragment text-[10px] font-bold text-stone-500 uppercase tracking-widest block mb-2">
+          {/* Right Column: Output Console & AI Feedback (5 Cols) */}
+          <div className="lg:col-span-5 bg-[#FAF4E5] border border-stone-300 rounded-2xl p-4 flex flex-col gap-3 shadow-2xs text-left">
+            <span className="font-fragment text-[10px] font-bold text-stone-500 uppercase tracking-widest block">
               OUTPUT CONSOLE
             </span>
 
             {/* Output Display Terminal */}
-            <div className="flex-1 bg-white border border-stone-300 rounded-xl p-4 font-mono text-xs text-stone-800 overflow-auto whitespace-pre-wrap min-h-[300px] leading-relaxed">
+            <div className="flex-1 bg-white border border-stone-300 rounded-xl p-3.5 font-mono text-xs text-stone-800 overflow-auto whitespace-pre-wrap min-h-[300px] leading-relaxed">
               {output}
             </div>
 
@@ -723,29 +803,80 @@ export default function TechnicalRound() {
               <motion.div
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="mt-4 p-4 rounded-xl bg-emerald-100 border border-emerald-400 text-emerald-900 text-xs font-bold flex items-center gap-2"
+                className="p-3.5 rounded-xl bg-emerald-100 border border-emerald-400 text-emerald-900 text-xs font-bold flex items-center gap-2"
               >
                 <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
                 <div>
-                  <p>Solution Submitted Successfully!</p>
-                  <p className="text-[11px] font-normal text-emerald-800">Time Taken: {formatTimer(selectedProblem.recommendedTimeSeconds - timeLeft)} · Score: 9.4/10</p>
+                  <p>Solution Submitted & AI Evaluated!</p>
+                  <p className="text-[11px] font-normal text-emerald-800">Language: {language.toUpperCase()} · Score: {evalScore !== null ? evalScore : 0}/10</p>
                 </div>
               </motion.div>
             )}
           </div>
         </div>
 
-        {/* Bottom Right Feedback Action Icons */}
-        <div className="flex items-center justify-end gap-2 text-stone-500 text-xs">
-          <button className="p-2 rounded-lg bg-stone-200/60 hover:bg-stone-300/80 transition-colors cursor-pointer">
-            <ThumbsUp className="w-4 h-4" />
-          </button>
-          <button className="p-2 rounded-lg bg-stone-200/60 hover:bg-stone-300/80 transition-colors cursor-pointer">
-            <ThumbsDown className="w-4 h-4" />
-          </button>
-          <button className="p-2 rounded-lg bg-stone-200/60 hover:bg-stone-300/80 transition-colors cursor-pointer">
-            <MessageSquare className="w-4 h-4" />
-          </button>
+        {/* Useful Candidate Action Tools (Matching Aptitude Round) */}
+        <div className="flex flex-wrap items-center justify-between gap-3 text-stone-600 text-xs pt-2 border-t border-stone-200/80">
+          <div className="flex items-center gap-2">
+            {/* Bookmark Question Button */}
+            <button
+              onClick={() => {
+                const currentPId = selectedProblem.questionId || selectedProblem.id
+                setBookmarkedProblems(prev => ({
+                  ...prev,
+                  [currentPId]: !prev[currentPId]
+                }))
+              }}
+              className={`px-3 py-2 rounded-xl border font-radio font-bold text-xs transition-all cursor-pointer flex items-center gap-1.5 shadow-2xs ${
+                bookmarkedProblems[selectedProblem.questionId || selectedProblem.id]
+                  ? 'bg-amber-100 border-amber-400 text-amber-900'
+                  : 'bg-white hover:bg-stone-100 border-stone-300 text-stone-700'
+              }`}
+              title="Bookmark problem for review"
+            >
+              <Bookmark className={`w-3.5 h-3.5 ${bookmarkedProblems[selectedProblem.questionId || selectedProblem.id] ? 'fill-amber-500 text-amber-600' : ''}`} />
+              <span>{bookmarkedProblems[selectedProblem.questionId || selectedProblem.id] ? 'Bookmarked ⭐' : 'Bookmark Problem'}</span>
+            </button>
+
+            {/* Copy Solution / Code Button */}
+            <button
+              onClick={() => {
+                navigator.clipboard.writeText(code)
+                setCopiedToast(true)
+                setTimeout(() => setCopiedToast(false), 2000)
+              }}
+              className="px-3 py-2 rounded-xl bg-white hover:bg-stone-100 border border-stone-300 text-stone-700 font-radio font-bold text-xs transition-all cursor-pointer flex items-center gap-1.5 shadow-2xs"
+              title="Copy code to clipboard"
+            >
+              {copiedToast ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+              <span>{copiedToast ? 'Copied Code!' : 'Copy Code'}</span>
+            </button>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {/* Clear Console Button */}
+            <button
+              onClick={() => setOutput('Console cleared. Run your code to see logs.')}
+              className="px-3 py-2 rounded-xl bg-white hover:bg-stone-100 border border-stone-300 text-stone-700 font-radio font-bold text-xs transition-all cursor-pointer flex items-center gap-1.5 shadow-2xs"
+              title="Clear output console"
+            >
+              <Trash2 className="w-3.5 h-3.5 text-stone-500" />
+              <span>Clear Console</span>
+            </button>
+
+            {/* Re-evaluate Solution Button */}
+            {isSubmitted && (
+              <button
+                onClick={() => handleSubmitSolution(false)}
+                disabled={isSubmitting}
+                className="px-3 py-2 rounded-xl bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 text-emerald-900 font-radio font-bold text-xs transition-all cursor-pointer flex items-center gap-1.5 shadow-2xs"
+                title="Re-evaluate solution with AI"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 text-emerald-700 ${isSubmitting ? 'animate-spin' : ''}`} />
+                <span>Re-evaluate Solution</span>
+              </button>
+            )}
+          </div>
         </div>
       </main>
 
@@ -787,12 +918,71 @@ export default function TechnicalRound() {
                 <button
                   onClick={() => {
                     setShowTimeUpModal(false)
-                    handleSubmitSolution()
+                    handleSubmitSolution(false)
                   }}
                   className="w-full sm:w-1/2 bg-black text-white font-radio font-bold text-xs py-3 rounded-xl hover:bg-stone-800 transition-all cursor-pointer flex items-center justify-center gap-1.5 shadow-md"
                 >
                   <CheckCircle2 className="w-4 h-4 text-emerald-400" />
                   <span>Submit Code</span>
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Assessment Completed Modal */}
+      <AnimatePresence>
+        {showCompletionModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs select-none">
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="w-full max-w-md bg-white border-2 border-black rounded-3xl p-6 shadow-[6px_6px_0px_0px_#000000] text-center flex flex-col items-center gap-4"
+            >
+              <div className="w-16 h-16 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center border-2 border-emerald-500 shadow-sm">
+                <CheckCircle2 className="w-10 h-10" />
+              </div>
+
+              <div>
+                <h2 className="font-serif text-2xl font-bold text-black">
+                  Technical Assessment Completed! 🎉
+                </h2>
+                <p className="text-xs text-stone-600 mt-1">
+                  Your coding algorithms and technical solutions have been submitted and evaluated.
+                </p>
+              </div>
+
+              <div className="w-full bg-[#FAF7ED] border border-stone-300 rounded-2xl p-4 flex flex-col gap-2 text-left">
+                <div className="flex items-center justify-between text-xs font-bold text-stone-700">
+                  <span>Last Code Score:</span>
+                  <span className="text-emerald-700 font-extrabold text-base">{evalScore !== null ? evalScore : 0} / 10</span>
+                </div>
+                <div className="flex items-center justify-between text-xs text-stone-600">
+                  <span>Submitted Solutions:</span>
+                  <span>{Object.keys(submittedSolutions).length} / {finalProblemsList.length}</span>
+                </div>
+                <div className="flex items-center justify-between text-xs text-stone-600">
+                  <span>Selected Language:</span>
+                  <span className="uppercase font-mono">{language}</span>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-center gap-3 w-full mt-2">
+                <button
+                  onClick={() => setShowCompletionModal(false)}
+                  className="w-1/2 bg-white border-2 border-black text-black font-radio font-bold text-xs py-3 rounded-xl hover:bg-stone-100 transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                >
+                  <span>Review Code</span>
+                </button>
+
+                <button
+                  onClick={() => navigate('/full-report')}
+                  className="w-1/2 bg-black text-white font-radio font-bold text-xs py-3 rounded-xl hover:bg-stone-800 transition-all cursor-pointer flex items-center justify-center gap-1.5 shadow-md active:scale-95"
+                >
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                  <span>View Full Report</span>
                 </button>
               </div>
             </motion.div>

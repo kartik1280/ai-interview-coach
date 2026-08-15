@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from supabase import Client
 from datetime import datetime
-from app.dependencies import get_supabase_client, get_user
+from app.dependencies import get_admin_client, get_user
 from app.models.schemas import ReportResponse, PracticeRoundCard, RecentHistoryItem
 
 router = APIRouter(prefix="/report", tags=["Report"])
@@ -9,7 +9,7 @@ router = APIRouter(prefix="/report", tags=["Report"])
 @router.get("/latest", response_model=ReportResponse)
 def get_latest_report(
     user = Depends(get_user),
-    client: Client = Depends(get_supabase_client)
+    client: Client = Depends(get_admin_client)
 ):
     try:
         # 1. Fetch user's profile
@@ -37,12 +37,12 @@ def get_latest_report(
             q_ids = [q["id"] for q in q_res.data] if q_res.data else []
             
             if q_ids:
-                ans_res = client.table("answers").select("score, created_at").in_("question_id", q_ids).execute()
+                ans_res = client.table("answers").select("score").in_("question_id", q_ids).execute()
                 answers = ans_res.data if ans_res.data else []
                 
                 if answers:
                     avg_score = sum(a["score"] for a in answers) / len(answers)
-                    created_at_str = answers[0]["created_at"]
+                    created_at_str = r.get("created_at", "")
                     
                     try:
                         dt = datetime.fromisoformat(created_at_str.replace("Z", "+00:00"))

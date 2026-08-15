@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from supabase import Client
 from datetime import datetime
-from app.dependencies import get_supabase_client, get_user
+from app.dependencies import get_admin_client, get_user
 from app.models.schemas import DashboardResponse, PracticeRoundCard, RecentHistoryItem
 
 router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
@@ -9,7 +9,7 @@ router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
 @router.get("", response_model=DashboardResponse)
 def get_dashboard(
     user = Depends(get_user),
-    client: Client = Depends(get_supabase_client)
+    client: Client = Depends(get_admin_client)
 ):
     try:
         # 1. Fetch user's profile
@@ -40,12 +40,12 @@ def get_dashboard(
             
             if q_ids:
                 # Fetch all answers for these questions
-                ans_res = client.table("answers").select("score, created_at").in_("question_id", q_ids).execute()
+                ans_res = client.table("answers").select("score").in_("question_id", q_ids).execute()
                 answers = ans_res.data if ans_res.data else []
                 
                 if answers:
                     avg_score = sum(a["score"] for a in answers) / len(answers)
-                    created_at_str = answers[0]["created_at"]
+                    created_at_str = r.get("created_at", "")
                     
                     # Convert to datetime to format "days ago"
                     try:

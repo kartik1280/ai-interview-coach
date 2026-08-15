@@ -87,6 +87,23 @@ export default function FullReport() {
     fillColor: getScoreColor(r.score)
   }))
 
+  // Derive scorecard from rounds data for the evaluation breakdown section
+  const techRound = rounds.find(r => r.id === 'technical')
+  const behRound = rounds.find(r => r.id === 'behavioral')
+  const aptRound = rounds.find(r => r.id === 'aptitude')
+  const scorecard = {
+    technical_accuracy: techRound
+      ? { score: techRound.score, feedback: techRound.feedback?.join('. ') || 'No feedback yet.' }
+      : { score: 0, feedback: 'No technical round completed yet.' },
+    sentence_formation: behRound
+      ? { score: behRound.score, feedback: behRound.feedback?.join('. ') || 'No feedback yet.' }
+      : { score: 0, feedback: 'No behavioral round completed yet.' },
+    communication_confidence: aptRound
+      ? { score: aptRound.score, feedback: aptRound.feedback?.join('. ') || 'No feedback yet.' }
+      : { score: 0, feedback: 'No aptitude round completed yet.' },
+    suggested_improvement: areasToImprove || null
+  }
+
   const overallColor = getScoreColor(overallScore)
 
   // Export to PDF Handler

@@ -3,8 +3,8 @@ from supabase import Client
 import uuid
 import random
 from app.dependencies import get_supabase_client, get_user, get_admin_client
-from app.models.schemas import RoundStartRequest, RoundStartResponse, QuestionResponse, AnswerSubmitRequest, AnswerSubmitResponse
-from app.services.ai_service import grade_technical_solution, grade_behavioral_response, grade_aptitude_response
+from app.models.schemas import RoundStartRequest, RoundStartResponse, QuestionResponse, AnswerSubmitRequest, AnswerSubmitResponse, AptitudeExplainRequest
+from app.services.ai_service import grade_technical_solution, grade_behavioral_response, grade_aptitude_response, generate_aptitude_explanation
 
 router = APIRouter(prefix="/round", tags=["Round Engine"])
 
@@ -104,15 +104,17 @@ def start_round(
                 time_sec = TECHNICAL_TIME_LIMITS[raw_diff]
 
                 # Format question text
-                q_title = q.get("question", "")
-                starter = q.get("starter_code", "")
-                q_text = f"[{raw_diff.upper()}] {q_title}"
-                if starter:
-                    q_text += f"\n\nStarter Code:\n{starter}"
+                q_title = q.get("title") or q.get("question") or ""
+                q_desc = q.get("problem_description") or ""
+                starter = q.get("starter_code_python") or q.get("starter_code") or ""
+
+                full_q_text = f"[{raw_diff.upper()}] {q_title}"
+                if q_desc:
+                    full_q_text += f"\n\nDescription:\n{q_desc}"
 
                 questions_to_insert.append({
                     "round_id": round_id,
-                    "question_text": q_text,
+                    "question_text": full_q_text,
                     "difficulty": raw_diff,
                     "time_limit_seconds": time_sec,
                     "starter_code": starter
@@ -143,7 +145,8 @@ def start_round(
                     "round_id": round_id,
                     "question_text": q_text,
                     "difficulty": "medium",
-                    "time_limit_seconds": 900
+                    "time_limit_seconds": 900,
+                    "explanation": q.get("explanation", "")
                 })
                 
         elif payload.roundType == "behavioral":
@@ -171,6 +174,7 @@ def start_round(
                 inserted_rec["difficulty"] = q_data.get("difficulty", "medium")
                 inserted_rec["time_limit_seconds"] = q_data.get("time_limit_seconds", 600)
                 inserted_rec["starter_code"] = q_data.get("starter_code", "")
+                inserted_rec["explanation"] = q_data.get("explanation", "")
                 inserted_qs.append(inserted_rec)
                 
         # 5. Format response
@@ -181,7 +185,8 @@ def start_round(
                 questionText=q["question_text"],
                 difficulty=q.get("difficulty", "medium"),
                 timeLimitSeconds=q.get("time_limit_seconds", 600),
-                starterCode=q.get("starter_code")
+                starterCode=q.get("starter_code"),
+                explanation=q.get("explanation")
             )
             for q in inserted_qs
         ]
@@ -225,7 +230,7 @@ def submit_answer(
         q_text = question_record.get("question_text", "")
         
         if round_type == "technical":
-            grade = grade_technical_solution(q_text, payload.answerText, "javascript")
+            grade = grade_technical_solution(q_text, payload.answerText, payload.language or "javascript")
         elif round_type == "behavioral":
             grade = grade_behavioral_response(q_text, payload.answerText)
         elif round_type == "aptitude":
@@ -290,3 +295,14 @@ def submit_answer(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to submit answer: {str(e)}")
+
+@router.post("/explain-aptitude")
+def explain_aptitude(
+    payload: AptitudeExplainRequest,
+    user = Depends(get_user)
+):
+    try:
+        explanation = generate_aptitude_explanation(payload.questionText, payload.options, payload.selectedOption)
+        return {"explanation": explanation}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to generate AI explanation: {str(e)}")

@@ -63,6 +63,7 @@ class QuestionResponse(BaseModel):
     timeLimitSeconds: Optional[int] = 1500
     starterCode: Optional[str] = None
     options: Optional[List[str]] = None
+    explanation: Optional[str] = None
 
 class RoundStartResponse(BaseModel):
     roundId: str
@@ -73,13 +74,17 @@ class RoundStartResponse(BaseModel):
 
 class AnswerSubmitRequest(BaseModel):
     answerText: str
+    language: Optional[str] = "javascript"
 
 class AnswerSubmitResponse(BaseModel):
     score: float
     feedback: str
     isCompleted: bool
     overallScore: Optional[float] = None
-    starBreakdown: Optional[Dict[str, float]] = None
+class AptitudeExplainRequest(BaseModel):
+    questionText: str
+    options: Optional[List[str]] = None
+    selectedOption: Optional[str] = None
 
 # Full Report
 class ReportResponse(BaseModel):

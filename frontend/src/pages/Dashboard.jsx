@@ -30,6 +30,7 @@ export default function Dashboard() {
   const [rounds, setRounds] = useState([])
   const [history, setHistory] = useState([])
   const [streak, setStreak] = useState(0)
+  const [roundsDone, setRoundsDone] = useState(0)
   const [avgReadiness, setAvgReadiness] = useState('0.0')
   const [areasToImprove, setAreasToImprove] = useState('')
 
@@ -74,6 +75,7 @@ export default function Dashboard() {
         setRounds(data.rounds)
         setHistory(data.recentHistory)
         setStreak(data.streak)
+        setRoundsDone(data.roundsDone)
         setAvgReadiness(data.avgReadiness.toFixed(1))
         setAreasToImprove(data.areasToImprove)
         
@@ -94,7 +96,7 @@ export default function Dashboard() {
   const initialLetter = (userProfile.fullName || 'S').charAt(0).toUpperCase()
 
   // Calculate dynamic stats
-  const totalRoundsCount = history.length
+  const totalRoundsCount = roundsDone
 
   const handleStartPracticeRound = () => {
     setIsModalOpen(true)

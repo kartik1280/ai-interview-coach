@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { ArrowLeft, Timer, CheckCircle2, HelpCircle, Pause, Play, RotateCcw, AlertCircle, Plus, ThumbsUp, ThumbsDown, MessageSquare } from 'lucide-react'
+import { ArrowLeft, Timer, CheckCircle2, HelpCircle, Pause, Play, RotateCcw, AlertCircle, Plus, Lock, Sparkles, Bookmark, Copy, Trash2, RefreshCw, Check } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 
 const APTITUDE_QUESTIONS = [
@@ -81,27 +81,124 @@ export default function AptitudeRound() {
       description: 'Select the correct choice from the options below.',
       options: options,
       correctOption: 1, // fallback
-      explanation: 'See performance report for detailed category analysis.'
+      explanation: bq.explanation || 'See performance report for detailed category analysis.'
     }
   })
 
   const finalQuestionsList = mappedQuestions.length > 0 ? mappedQuestions : APTITUDE_QUESTIONS
 
   const [currentIdx, setCurrentIdx] = useState(0)
-  const [selectedOption, setSelectedOption] = useState(null)
+  const [answers, setAnswers] = useState({})
+  const [lockedAnswers, setLockedAnswers] = useState({})
+  const [aiExplanations, setAiExplanations] = useState({})
+  const [isExplaining, setIsExplaining] = useState(false)
+  const [explanationAlert, setExplanationAlert] = useState(null)
   const [showExplanation, setShowExplanation] = useState(false)
   const [scratchpad, setScratchpad] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isSubmitted, setIsSubmitted] = useState(false)
+  const [showCompletionModal, setShowCompletionModal] = useState(false)
   const [evalScore, setEvalScore] = useState(null)
   const [evalFeedback, setEvalFeedback] = useState('')
+
+  const currentQ = finalQuestionsList[currentIdx]
+  const currentQId = currentQ.questionId || currentQ.id
+  const selectedOption = answers[currentQId] !== undefined ? answers[currentQId] : null
+
+  const saveAnswerToBackend = async (qId, optIdx) => {
+    try {
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession()
+      if (sessionError || !session) return
+      const letter = ['A', 'B', 'C', 'D'][optIdx]
+      await fetch(`${import.meta.env.VITE_API_BASE_URL}/round/${roundId}/answer?question_id=${qId}`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          answerText: letter
+        })
+      })
+    } catch (err) {
+      console.warn('Background sync failed:', err)
+    }
+  }
+
+  const handleOptionSelect = (optIdx) => {
+    if (isSubmitted || lockedAnswers[currentQId]) return
+    setAnswers((prev) => ({
+      ...prev,
+      [currentQId]: optIdx
+    }))
+    setExplanationAlert(null)
+  }
+
+  const handleLockInAnswer = () => {
+    if (selectedOption === null || lockedAnswers[currentQId] || isSubmitted) return
+    setLockedAnswers((prev) => ({
+      ...prev,
+      [currentQId]: true
+    }))
+    saveAnswerToBackend(currentQId, selectedOption)
+    setExplanationAlert(null)
+  }
+
+  const [bookmarkedQuestions, setBookmarkedQuestions] = useState({})
+  const [copiedToast, setCopiedToast] = useState(false)
+
+  const fetchAiExplanation = async (forceRefresh = false) => {
+    if (aiExplanations[currentQId] && !forceRefresh) return
+    setIsExplaining(true)
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const selectedOptText = selectedOption !== null ? currentQ.options[selectedOption] : null
+      const res = await fetch(`${import.meta.env.VITE_API_BASE_URL}/round/explain-aptitude`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${session?.access_token || ''}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          questionText: `${currentQ.title} ${currentQ.description || ''}`,
+          options: currentQ.options,
+          selectedOption: selectedOptText
+        })
+      })
+      if (res.ok) {
+        const data = await res.json()
+        if (data.explanation) {
+          setAiExplanations(prev => ({
+            ...prev,
+            [currentQId]: data.explanation
+          }))
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to fetch AI explanation:', err)
+    } finally {
+      setIsExplaining(false)
+    }
+  }
+
+  const handleCheckExplanation = () => {
+    if (!lockedAnswers[currentQId] && !isSubmitted) {
+      setExplanationAlert("Please lock in your answer for this question first to unlock the AI step-by-step explanation!")
+      setShowExplanation(false)
+      return
+    }
+    setExplanationAlert(null)
+    const nextShow = !showExplanation
+    setShowExplanation(nextShow)
+    if (nextShow) {
+      fetchAiExplanation()
+    }
+  }
 
   // 15 Minutes Total Timer State (900 seconds)
   const [timeLeft, setTimeLeft] = useState(900)
   const [isTimerActive, setIsTimerActive] = useState(true)
   const [showTimeUpModal, setShowTimeUpModal] = useState(false)
-
-  const currentQ = finalQuestionsList[currentIdx]
 
   // Handle timeout auto-submit
   const handleTimeoutAutoSubmit = () => {
@@ -139,14 +236,13 @@ export default function AptitudeRound() {
 
   const handleNextQuestion = () => {
     setCurrentIdx((prev) => (prev + 1) % finalQuestionsList.length)
-    setSelectedOption(null)
     setShowExplanation(false)
   }
 
   const handleSubmitAssessment = async (isTimeout = false) => {
     if (isSubmitting) return
-    if (!isTimeout && selectedOption === null) {
-      alert("Please select an option before submitting.")
+    if (!isTimeout && Object.keys(answers).length === 0) {
+      alert("Please answer at least one question before submitting.")
       return
     }
 
@@ -157,32 +253,59 @@ export default function AptitudeRound() {
         throw new Error('No active user session. Please log in.')
       }
 
-      const letter = selectedOption !== null ? ['A', 'B', 'C', 'D'][selectedOption] : 'A'
-      const qId = currentQ.questionId || currentQ.id
-      const res = await fetch(`${import.meta.env.VITE_API_BASE_URL}/round/${roundId}/answer?question_id=${qId}`, {
+      const firstCount = finalQuestionsList.length - 1
+      const firstPart = finalQuestionsList.slice(0, firstCount)
+      const lastQ = finalQuestionsList[firstCount]
+
+      // Submit first 49 (or all but last) in parallel
+      const firstPromises = firstPart.map(async (q) => {
+        const qId = q.questionId || q.id
+        const savedOptionIdx = answers[qId]
+        const letter = (savedOptionIdx !== undefined && savedOptionIdx !== null) ? ['A', 'B', 'C', 'D'][savedOptionIdx] : 'unanswered'
+
+        return fetch(`${import.meta.env.VITE_API_BASE_URL}/round/${roundId}/answer?question_id=${qId}`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${session.access_token}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            answerText: letter
+          })
+        })
+      })
+
+      await Promise.all(firstPromises)
+
+      // Submit the last question sequentially to trigger final evaluation
+      const lastQId = lastQ.questionId || lastQ.id
+      const lastOptionIdx = answers[lastQId]
+      const lastLetter = (lastOptionIdx !== undefined && lastOptionIdx !== null) ? ['A', 'B', 'C', 'D'][lastOptionIdx] : 'unanswered'
+
+      const res = await fetch(`${import.meta.env.VITE_API_BASE_URL}/round/${roundId}/answer?question_id=${lastQId}`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${session.access_token}`,
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          answerText: letter
+          answerText: lastLetter
         })
       })
 
       if (!res.ok) {
         const errData = await res.json()
-        throw new Error(errData.detail || 'Failed to submit answer')
+        throw new Error(errData.detail || 'Failed to submit final assessment')
       }
 
       const data = await res.json()
-      setEvalScore(data.score)
+      setEvalScore(data.overallScore || data.score)
       setEvalFeedback(data.feedback)
       setIsSubmitted(true)
       setIsTimerActive(false)
-      setShowExplanation(true)
+      setShowCompletionModal(true)
     } catch (err) {
-      console.error('Error submitting answer:', err)
+      console.error('Error submitting assessment:', err)
       if (!isTimeout) alert(`Submission failed: ${err.message}`)
     } finally {
       setIsSubmitting(false)
@@ -230,7 +353,23 @@ export default function AptitudeRound() {
             </p>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
+            {/* Locked Count Progress Badge */}
+            <div className="hidden sm:flex items-center gap-1.5 px-3 py-2 rounded-xl bg-stone-200/80 border border-stone-300 text-stone-800 font-bold text-xs">
+              <Lock className="w-3.5 h-3.5 text-stone-600" />
+              <span>{Object.keys(lockedAnswers).length} / {finalQuestionsList.length} Locked</span>
+            </div>
+
+            {/* Global Submit Assessment Button */}
+            <button
+              onClick={handleSubmitAssessment}
+              disabled={isSubmitting}
+              className="bg-black hover:bg-stone-800 active:scale-95 text-white font-radio font-bold text-xs px-4 py-2 sm:px-5 sm:py-2.5 rounded-xl transition-all cursor-pointer shadow-xs flex items-center gap-1.5"
+            >
+              <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+              <span>Submit Assessment</span>
+            </button>
+
             {/* Interactive Timer Badge */}
             <div className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border-2 shadow-xs transition-all ${getTimerBadgeStyle()}`}>
               <Timer className="w-4 h-4" />
@@ -258,25 +397,40 @@ export default function AptitudeRound() {
               </button>
             </div>
 
-            {/* Question Numbers Tabs */}
-            <div className="flex items-center gap-1.5 ml-2">
-              {finalQuestionsList.map((q, idx) => (
-                <button
-                  key={q.id}
-                  onClick={() => {
-                    setCurrentIdx(idx)
-                    setSelectedOption(null)
-                    setShowExplanation(false)
-                  }}
-                  className={`w-8 h-8 rounded-full font-bold text-xs transition-all cursor-pointer ${
-                    currentIdx === idx
-                      ? 'bg-black text-white'
-                      : 'bg-stone-200 text-stone-700 hover:bg-stone-300'
-                  }`}
-                >
-                  {idx + 1}
-                </button>
-              ))}
+            {/* Question Numbers Scrollable Track */}
+            <div className="flex items-center gap-1.5 overflow-x-auto max-w-[200px] sm:max-w-[340px] md:max-w-[460px] py-1 px-2 bg-stone-100/90 border border-stone-300 rounded-2xl no-scrollbar">
+              {finalQuestionsList.map((q, idx) => {
+                const qId = q.questionId || q.id
+                const isCurrent = currentIdx === idx
+                const isLocked = lockedAnswers[qId]
+                const isAnswered = answers[qId] !== undefined
+
+                const isBookmarked = bookmarkedQuestions[qId]
+                let style = 'bg-white text-stone-700 border border-stone-300 hover:bg-stone-200'
+                if (isCurrent) {
+                  style = 'bg-black text-white shadow-xs font-bold scale-105'
+                } else if (isLocked) {
+                  style = 'bg-emerald-600 text-white font-bold'
+                } else if (isAnswered) {
+                  style = 'bg-stone-300 text-black font-semibold'
+                }
+
+                return (
+                  <button
+                    key={q.id}
+                    onClick={() => {
+                      setCurrentIdx(idx)
+                      setShowExplanation(false)
+                      setExplanationAlert(null)
+                    }}
+                    className={`w-7 h-7 sm:w-8 sm:h-8 shrink-0 rounded-full font-bold text-xs transition-all cursor-pointer flex items-center justify-center relative ${style}`}
+                    title={isBookmarked ? "Bookmarked question" : `Question ${idx + 1}`}
+                  >
+                    {isBookmarked && <span className="absolute -top-1 -right-1 text-[10px]">⭐</span>}
+                    {isLocked && !isCurrent ? '✓' : idx + 1}
+                  </button>
+                )
+              })}
             </div>
           </div>
         </div>
@@ -301,44 +455,75 @@ export default function AptitudeRound() {
 
               {/* Options */}
               <div className="flex flex-col gap-3">
-                {currentQ.options.map((opt, optIdx) => (
-                  <button
-                    key={optIdx}
-                    onClick={() => !isSubmitted && setSelectedOption(optIdx)}
-                    disabled={isSubmitted}
-                    className={`w-full p-4 rounded-xl border-2 text-left font-radio font-bold text-sm transition-all cursor-pointer flex items-center justify-between ${
-                      selectedOption === optIdx
-                        ? 'border-black bg-stone-50 shadow-xs'
-                        : 'border-stone-200 hover:border-stone-300 bg-white'
-                    }`}
-                  >
-                    <span>{opt}</span>
-                    <div className={`w-4 h-4 rounded-full border-2 border-black flex items-center justify-center ${selectedOption === optIdx ? 'bg-black' : 'bg-white'}`}>
-                      {selectedOption === optIdx && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
-                    </div>
-                  </button>
-                ))}
+                {currentQ.options.map((opt, optIdx) => {
+                  const isLocked = lockedAnswers[currentQId]
+                  return (
+                    <button
+                      key={optIdx}
+                      onClick={() => !isSubmitted && !isLocked && handleOptionSelect(optIdx)}
+                      disabled={isSubmitted || isLocked}
+                      className={`w-full p-4 rounded-xl border-2 text-left font-radio font-bold text-sm transition-all cursor-pointer flex items-center justify-between ${
+                        selectedOption === optIdx
+                          ? isLocked ? 'border-emerald-600 bg-emerald-50 shadow-xs' : 'border-black bg-stone-50 shadow-xs'
+                          : 'border-stone-200 hover:border-stone-300 bg-white'
+                      } ${(isSubmitted || isLocked) ? 'cursor-default opacity-90' : ''}`}
+                    >
+                      <span>{opt}</span>
+                      <div className={`w-4 h-4 rounded-full border-2 border-black flex items-center justify-center ${selectedOption === optIdx ? (isLocked ? 'bg-emerald-600 border-emerald-600' : 'bg-black') : 'bg-white'}`}>
+                        {selectedOption === optIdx && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
+                      </div>
+                    </button>
+                  )
+                })}
               </div>
             </div>
+
+            {/* Warning Alert if explanation requested before locking */}
+            {explanationAlert && (
+              <motion.div
+                initial={{ opacity: 0, y: -5 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="mt-4 p-3.5 rounded-xl bg-amber-50 border border-amber-300 text-amber-900 text-xs font-bold flex items-center gap-2 text-left"
+              >
+                <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                <span>{explanationAlert}</span>
+              </motion.div>
+            )}
 
             {/* Action Bar */}
             <div className="flex flex-wrap items-center justify-between gap-3 pt-6 mt-6 border-t border-stone-200">
               <button
-                onClick={() => setShowExplanation(!showExplanation)}
-                className="bg-[#E2F0E0] hover:bg-[#D4E8D2] active:scale-95 text-stone-900 font-radio font-bold text-xs px-5 py-2.5 rounded-xl transition-all cursor-pointer flex items-center gap-1.5"
+                onClick={handleCheckExplanation}
+                className={`font-radio font-bold text-xs px-5 py-2.5 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 ${
+                  lockedAnswers[currentQId] || isSubmitted
+                    ? 'bg-[#E2F0E0] hover:bg-[#D4E8D2] text-stone-900 active:scale-95'
+                    : 'bg-stone-100 hover:bg-stone-200 text-stone-600'
+                }`}
               >
-                <HelpCircle className="w-4 h-4 text-emerald-700" />
-                <span>{showExplanation ? 'Hide Explanation' : 'Check Explanation'}</span>
+                <Sparkles className="w-4 h-4 text-emerald-700" />
+                <span>{showExplanation ? 'Hide AI Explanation' : 'Check AI Explanation'}</span>
               </button>
 
               <div className="flex items-center gap-2">
-                <button
-                  onClick={handleSubmitAssessment}
-                  className="bg-black hover:bg-stone-800 text-white font-radio font-bold text-xs px-5 py-2.5 rounded-xl transition-all cursor-pointer shadow-xs flex items-center gap-1.5"
-                >
-                  <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                  <span>Submit Assessment</span>
-                </button>
+                {lockedAnswers[currentQId] || isSubmitted ? (
+                  <div className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-emerald-100 border border-emerald-400 text-emerald-900 font-bold text-xs">
+                    <Lock className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>Answer Locked</span>
+                  </div>
+                ) : (
+                  <button
+                    onClick={handleLockInAnswer}
+                    disabled={selectedOption === null}
+                    className={`font-radio font-bold text-xs px-5 py-2.5 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shadow-xs ${
+                      selectedOption === null
+                        ? 'bg-stone-200 text-stone-400 cursor-not-allowed border border-stone-300'
+                        : 'bg-black hover:bg-stone-800 text-white active:scale-95'
+                    }`}
+                  >
+                    <Lock className="w-4 h-4 text-amber-400" />
+                    <span>Lock In Answer</span>
+                  </button>
+                )}
 
                 <button
                   onClick={handleNextQuestion}
@@ -386,12 +571,22 @@ export default function AptitudeRound() {
                   exit={{ opacity: 0, y: 10 }}
                   className="bg-white border-2 border-black rounded-xl p-4 shadow-xs"
                 >
-                  <span className="font-fragment text-[10px] font-bold text-[#2F8F6E] uppercase tracking-wider block mb-1">
-                    AI LOGICAL BREAKDOWN
+                  <span className="font-fragment text-[10px] font-bold text-[#2F8F6E] uppercase tracking-wider flex items-center gap-1.5 mb-2">
+                    <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
+                    AI STEP-BY-STEP LOGICAL BREAKDOWN
                   </span>
-                  <p className="font-radio text-xs text-stone-700 leading-relaxed mb-3">
-                    {currentQ.explanation}
-                  </p>
+
+                  {isExplaining ? (
+                    <div className="py-4 flex items-center gap-2 text-stone-600 text-xs font-radio font-bold">
+                      <Sparkles className="w-4 h-4 text-amber-500 animate-spin" />
+                      <span>Generating step-by-step AI explanation...</span>
+                    </div>
+                  ) : (
+                    <p className="font-radio text-xs text-stone-800 leading-relaxed whitespace-pre-wrap mb-3">
+                      {aiExplanations[currentQId] || currentQ.explanation}
+                    </p>
+                  )}
+
                   {evalFeedback && (
                     <p className="font-radio text-xs text-stone-600 border-t pt-2 border-stone-100 leading-relaxed">
                       <strong>AI Evaluation Feedback:</strong> {evalFeedback}
@@ -403,17 +598,69 @@ export default function AptitudeRound() {
           </div>
         </div>
 
-        {/* Bottom Feedback Actions */}
-        <div className="flex items-center justify-end gap-2 text-stone-500 text-xs">
-          <button className="p-2 rounded-lg bg-stone-200/60 hover:bg-stone-300/80 transition-colors cursor-pointer">
-            <ThumbsUp className="w-4 h-4" />
-          </button>
-          <button className="p-2 rounded-lg bg-stone-200/60 hover:bg-stone-300/80 transition-colors cursor-pointer">
-            <ThumbsDown className="w-4 h-4" />
-          </button>
-          <button className="p-2 rounded-lg bg-stone-200/60 hover:bg-stone-300/80 transition-colors cursor-pointer">
-            <MessageSquare className="w-4 h-4" />
-          </button>
+        {/* Useful Candidate Action Tools */}
+        <div className="flex flex-wrap items-center justify-between gap-3 text-stone-600 text-xs pt-2 border-t border-stone-200/80">
+          <div className="flex items-center gap-2">
+            {/* Bookmark Question Button */}
+            <button
+              onClick={() => {
+                setBookmarkedQuestions(prev => ({
+                  ...prev,
+                  [currentQId]: !prev[currentQId]
+                }))
+              }}
+              className={`px-3 py-2 rounded-xl border font-radio font-bold text-xs transition-all cursor-pointer flex items-center gap-1.5 shadow-xs ${
+                bookmarkedQuestions[currentQId]
+                  ? 'bg-amber-100 border-amber-400 text-amber-900'
+                  : 'bg-white hover:bg-stone-100 border-stone-300 text-stone-700'
+              }`}
+              title="Bookmark question for review"
+            >
+              <Bookmark className={`w-3.5 h-3.5 ${bookmarkedQuestions[currentQId] ? 'fill-amber-500 text-amber-600' : ''}`} />
+              <span>{bookmarkedQuestions[currentQId] ? 'Bookmarked ⭐' : 'Bookmark Question'}</span>
+            </button>
+
+            {/* Copy AI Explanation Button */}
+            <button
+              onClick={() => {
+                const textToCopy = aiExplanations[currentQId] || `${currentQ.title}\n\nExplanation: ${currentQ.explanation}`
+                navigator.clipboard.writeText(textToCopy)
+                setCopiedToast(true)
+                setTimeout(() => setCopiedToast(false), 2000)
+              }}
+              className="px-3 py-2 rounded-xl bg-white hover:bg-stone-100 border border-stone-300 text-stone-700 font-radio font-bold text-xs transition-all cursor-pointer flex items-center gap-1.5 shadow-xs"
+              title="Copy AI step-by-step explanation"
+            >
+              {copiedToast ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+              <span>{copiedToast ? 'Copied to Clipboard!' : 'Copy AI Explanation'}</span>
+            </button>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {/* Clear Scratchpad Button */}
+            <button
+              onClick={() => setScratchpad('')}
+              disabled={!scratchpad}
+              className="px-3 py-2 rounded-xl bg-white hover:bg-stone-100 border border-stone-300 text-stone-700 font-radio font-bold text-xs transition-all cursor-pointer flex items-center gap-1.5 shadow-xs disabled:opacity-50 disabled:cursor-not-allowed"
+              title="Clear scratchpad text"
+            >
+              <Trash2 className="w-3.5 h-3.5 text-stone-500" />
+              <span>Clear Scratchpad</span>
+            </button>
+
+            {/* Regenerate AI Analysis Button */}
+            {lockedAnswers[currentQId] && (
+              <button
+                onClick={() => fetchAiExplanation(true)}
+                disabled={isExplaining}
+                className="px-3 py-2 rounded-xl bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 text-emerald-900 font-radio font-bold text-xs transition-all cursor-pointer flex items-center gap-1.5 shadow-xs"
+                title="Regenerate AI solution analysis"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 text-emerald-700 ${isExplaining ? 'animate-spin' : ''}`} />
+                <span>Regenerate AI Analysis</span>
+              </button>
+            )}
+          </div>
         </div>
       </main>
 
@@ -461,6 +708,65 @@ export default function AptitudeRound() {
                 >
                   <CheckCircle2 className="w-4 h-4 text-emerald-400" />
                   <span>View Results</span>
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Assessment Completed Modal */}
+      <AnimatePresence>
+        {showCompletionModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs select-none">
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="w-full max-w-md bg-white border-2 border-black rounded-3xl p-6 shadow-[6px_6px_0px_0px_#000000] text-center flex flex-col items-center gap-4"
+            >
+              <div className="w-16 h-16 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center border-2 border-emerald-500 shadow-sm">
+                <CheckCircle2 className="w-10 h-10" />
+              </div>
+
+              <div>
+                <h2 className="font-serif text-2xl font-bold text-black">
+                  Assessment Completed! 🎉
+                </h2>
+                <p className="text-xs text-stone-600 mt-1">
+                  Your Aptitude & Quantitative Reasoning test has been submitted and evaluated.
+                </p>
+              </div>
+
+              <div className="w-full bg-[#FAF7ED] border border-stone-300 rounded-2xl p-4 flex flex-col gap-2 text-left">
+                <div className="flex items-center justify-between text-xs font-bold text-stone-700">
+                  <span>Score Evaluated:</span>
+                  <span className="text-emerald-700 font-extrabold text-base">{evalScore !== null ? evalScore : 0} / 10</span>
+                </div>
+                <div className="flex items-center justify-between text-xs text-stone-600">
+                  <span>Locked Answers:</span>
+                  <span>{Object.keys(lockedAnswers).length} / {finalQuestionsList.length}</span>
+                </div>
+                <div className="flex items-center justify-between text-xs text-stone-600">
+                  <span>Time Elapsed:</span>
+                  <span>{formatTime(900 - timeLeft)}</span>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-center gap-3 w-full mt-2">
+                <button
+                  onClick={() => setShowCompletionModal(false)}
+                  className="w-1/2 bg-white border-2 border-black text-black font-radio font-bold text-xs py-3 rounded-xl hover:bg-stone-100 transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                >
+                  <span>Review Solutions</span>
+                </button>
+
+                <button
+                  onClick={() => navigate('/full-report')}
+                  className="w-1/2 bg-black text-white font-radio font-bold text-xs py-3 rounded-xl hover:bg-stone-800 transition-all cursor-pointer flex items-center justify-center gap-1.5 shadow-md active:scale-95"
+                >
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                  <span>View Full Report</span>
                 </button>
               </div>
             </motion.div>

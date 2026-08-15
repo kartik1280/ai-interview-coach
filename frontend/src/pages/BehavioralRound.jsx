@@ -1,14 +1,9 @@
-import React, { useState, useMemo, useCallback, useEffect } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
-import { useNavigate, useLocation } from 'react-router-dom'
-import { ArrowLeft, Wifi, WifiOff, Volume2, Mic, Brain, AlertCircle, Play, Clock, Sparkles, StopCircle, FileText, UploadCloud, CheckCircle2 } from 'lucide-react'
 import React, { useState, useEffect, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { ArrowLeft, Wifi, WifiOff, Volume2, Mic, MicOff, Brain, AlertCircle, Sparkles, Award } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useInterviewSocket } from '../hooks/useInterviewSocket'
-import { useInterviewTimer } from '../hooks/useInterviewTimer'
 
 const BEHAVIORAL_QUESTIONS = [
   'Tell me about a time you faced a difficult teammate. What did you do?',
@@ -18,8 +13,7 @@ const BEHAVIORAL_QUESTIONS = [
 ]
 
 const STATUS_CONFIG = {
-  idle: { label: 'Click Start to begin session', color: 'text-stone-500', pulse: false },
-  connecting: { label: 'Connecting to AI coach...', color: 'text-amber-600', pulse: true },
+  connecting: { label: 'Connecting...', color: 'text-amber-600', pulse: true },
   listening: { label: 'Listening to you...', color: 'text-emerald-700', pulse: true },
   ai_thinking: { label: 'AI is thinking...', color: 'text-blue-600', pulse: true },
   ai_speaking: { label: 'AI is speaking...', color: 'text-violet-600', pulse: true },
@@ -61,32 +55,8 @@ export default function BehavioralRound() {
     aiText,
     status,
     isConnected,
-    transcript,
-    fullTranscript,
-    fullTranscriptRef,
-    endSession
-  } = useInterviewSocket(resumeText, candidateName, resumeCandidateName, hasStarted && !isEvaluating)
-
-  // End & Evaluate Interview Callback
-  const handleTerminateAndScore = useCallback(async () => {
-    console.log('🛑 Terminating 5-Minute Interview & Evaluating Scorecard...');
-    endSession()
-    setIsEvaluating(true)
-
-    try {
-      setEvalProgress('Transcribing audio stream & gathering transcript...')
-      const currentHistory = fullTranscriptRef?.current?.length > 0 ? fullTranscriptRef.current : fullTranscript
-
-      setEvalProgress('Evaluating technical accuracy & communication via Groq Llama-3.3-70b...')
-      const res = await fetch('http://localhost:5050/api/evaluate-interview', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ transcript: currentHistory })
-      })
-
-      if (!res.ok) {
-        throw new Error(`Evaluation failed with status ${res.status}`)
-      }
+    transcript
+  } = useInterviewSocket(resumeText, candidateName)
 
   const statusInfo = STATUS_CONFIG[status] || STATUS_CONFIG.connecting
   const currentQuestion = questionsList[questionIndex] || { id: 'q-1', questionText: BEHAVIORAL_QUESTIONS[0] }
@@ -192,49 +162,12 @@ export default function BehavioralRound() {
       case 'listening': return <Mic className="w-10 h-10 text-blue-700" />
       case 'ai_thinking': return <Brain className="w-10 h-10 text-amber-700" />
       case 'error': return <AlertCircle className="w-10 h-10 text-red-600" />
-      default: return <Mic className="w-10 h-10 text-stone-500" />
+      default: return null
     }
   }, [status])
 
   return (
-    <div className="min-h-screen bg-[#FAF7ED] text-black font-radio selection:bg-parker-red selection:text-white flex flex-col justify-between relative">
-      {/* Hidden Audio Tag for DOM Mounting */}
-      <audio id="ai-audio-player" hidden />
-
-      {/* Retro Loading & Evaluation Modal Overlay */}
-      <AnimatePresence>
-        {isEvaluating && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4"
-          >
-            <motion.div
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              className="bg-[#FFFDF8] border-4 border-black rounded-3xl p-8 max-w-md w-full text-center shadow-[10px_10px_0px_0px_#000000] flex flex-col items-center gap-5"
-            >
-              <div className="w-16 h-16 rounded-full bg-amber-100 border-2 border-black flex items-center justify-center animate-bounce">
-                <Sparkles className="w-8 h-8 text-amber-600 animate-spin" />
-              </div>
-              <div>
-                <h3 className="font-serif font-bold text-2xl text-black">
-                  Loading Your Results...
-                </h3>
-                <p className="text-xs font-radio text-stone-600 mt-1 font-semibold">
-                  5-Minute Session Terminated
-                </p>
-              </div>
-
-              <div className="w-full bg-stone-100 border border-stone-300 rounded-xl p-3 text-xs font-mono font-bold text-stone-700">
-                {evalProgress}
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
+    <div className="min-h-screen bg-[#FAF7ED] text-black font-radio selection:bg-parker-red selection:text-white flex flex-col justify-between">
       {/* Top Header Navbar */}
       <header className="px-6 py-4 border-b border-stone-200 bg-[#FAF7ED] flex items-center justify-between">
         <div className="flex items-center gap-4">
@@ -251,15 +184,7 @@ export default function BehavioralRound() {
           </span>
         </div>
 
-        <div className="flex items-center gap-5 font-radio text-sm font-bold text-stone-600">
-          {/* Live 5-Minute Timer Badge */}
-          {hasStarted && (
-            <div className="flex items-center gap-1.5 px-3 py-1 bg-stone-100 border border-stone-300 rounded-full font-mono text-xs font-bold text-stone-800 shadow-xs">
-              <Clock className="w-3.5 h-3.5 text-parker-red animate-pulse" />
-              <span>{formatTime()}</span>
-            </div>
-          )}
-
+        <div className="flex items-center gap-6 font-radio text-sm font-bold text-stone-600">
           <div className="flex items-center gap-1.5 text-xs font-semibold">
             {isConnected ? (
               <span className="text-emerald-700 flex items-center gap-1">
@@ -271,13 +196,8 @@ export default function BehavioralRound() {
               </span>
             )}
           </div>
-
-          <button
-            onClick={handleTerminateAndScore}
-            className="hover:text-parker-red transition-colors cursor-pointer flex items-center gap-1 text-xs font-bold bg-stone-200 hover:bg-stone-300 px-3 py-1.5 rounded-lg border border-stone-400"
-          >
-            <StopCircle className="w-3.5 h-3.5 text-parker-red" />
-            <span>End Interview</span>
+          <button onClick={() => navigate('/dashboard')} className="hover:text-black transition-colors cursor-pointer">
+            End Interview
           </button>
         </div>
       </header>
@@ -325,6 +245,7 @@ export default function BehavioralRound() {
                 {CenterIcon}
               </motion.div>
             </div>
+          </div>
 
           {/* AI Label */}
           <div>
@@ -336,23 +257,22 @@ export default function BehavioralRound() {
             </p>
           </div>
 
-            {/* Dynamic Resume Upload / Context Status Card */}
-            <div className="w-full bg-stone-50 border-2 border-stone-300 rounded-2xl p-5 flex flex-col items-center gap-3">
-              {resumeParsed && !showReupload ? (
-                /* Dynamic Success Badge with Snippet & Change Option */
-                <div className="w-full flex flex-col items-center gap-2">
-                  <div className="flex items-center justify-between w-full px-3 py-1.5 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-800 font-bold text-xs">
-                    <div className="flex items-center gap-1.5">
-                      <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                      <span>Resume Context Loaded</span>
-                    </div>
-                    <button
-                      onClick={() => setShowReupload(true)}
-                      className="text-[11px] font-radio text-stone-600 hover:text-black underline cursor-pointer"
-                    >
-                      Change Resume
-                    </button>
-                  </div>
+          {/* Dynamic Status Indicator */}
+          <motion.div
+            key={status}
+            initial={{ opacity: 0, y: 5 }}
+            animate={{ opacity: 1, y: 0 }}
+            className={`flex items-center gap-2 text-sm font-bold ${statusInfo.color}`}
+          >
+            {statusInfo.pulse && (
+              <span className="relative flex h-2.5 w-2.5">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-current opacity-75" />
+                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-current" />
+              </span>
+            )}
+            <span>{statusInfo.label}</span>
+          </motion.div>
+        </div>
 
         {/* Question Card Container */}
         <div className="w-full max-w-2xl bg-[#FAF4E5] border border-stone-300 rounded-3xl p-6 sm:p-8 shadow-xs text-left">
@@ -427,40 +347,15 @@ export default function BehavioralRound() {
               exit={{ opacity: 0, y: 8 }}
               className="w-full max-w-2xl bg-white/80 border border-stone-200 rounded-2xl px-5 py-3 text-left"
             >
-              {isUploading ? (
-                <>
-                  <Sparkles className="w-5 h-5 text-amber-400 animate-spin" />
-                  <span>Parsing Resume Context...</span>
-                </>
-              ) : !resumeParsed ? (
-                <span>Upload Resume Above to Unlock Interview</span>
-              ) : (
-                <>
-                  <Play className="w-5 h-5 fill-emerald-400 text-emerald-400" />
-                  <span>Start 5-Min Voice Interview</span>
-                </>
-              )}
-            </button>
-          </motion.div>
-        ) : (
-          /* STEP 3: ACTIVE VOICE SESSION UI */
-          <>
-            {/* AI Avatar with Dynamic Aura */}
-            <div className="flex flex-col items-center gap-4">
-              <div className="relative flex items-center justify-center">
-                {/* Animated Pulsing Aura */}
-                <motion.div
-                  animate={{
-                    scale: auraConfig.scale,
-                    opacity: auraConfig.opacity
-                  }}
-                  transition={{
-                    repeat: Infinity,
-                    duration: auraConfig.duration,
-                    ease: 'easeInOut'
-                  }}
-                  className={`absolute w-52 h-52 rounded-full ${auraConfig.color} blur-xl`}
-                />
+              <span className="font-fragment text-[10px] font-bold text-blue-500 uppercase tracking-widest block mb-1">
+                YOUR VOICE (LIVE)
+              </span>
+              <p className="text-sm text-stone-700 font-radio italic">
+                "{transcript}"
+              </p>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Backend API Error Banner */}
         <AnimatePresence>
