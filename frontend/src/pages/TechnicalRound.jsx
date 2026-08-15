@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router-dom'
 import Editor from '@monaco-editor/react'
-import { ArrowLeft, Play, Pause, RotateCcw, CheckCircle2, ThumbsUp, ThumbsDown, MessageSquare, Moon, Sun, Timer, AlertCircle, Plus, Volume2, VolumeX, Mic, MicOff, Sparkles } from 'lucide-react'
+import { ArrowLeft, Play, Pause, RotateCcw, CheckCircle2, ThumbsUp, ThumbsDown, MessageSquare, Moon, Sun, Timer, AlertCircle, Plus } from 'lucide-react'
 
 const PROBLEMS = [
   {
@@ -176,16 +176,56 @@ int main() {
 
 export default function TechnicalRound() {
   const navigate = useNavigate()
-  const [selectedProblem, setSelectedProblem] = useState(PROBLEMS[0])
+  const location = useLocation()
+
+  // Retrieve passed round details
+  const roundState = location.state || {}
+  const roundId = roundState.roundId
+  const backendQuestions = roundState.questions || []
+
+  // Map backend questions to PROBLEM shapes
+  const mappedProblems = backendQuestions.map((bq) => {
+    // Try to find matching local problem by title substring
+    const matched = PROBLEMS.find(p => bq.questionText.toLowerCase().includes(p.title.toLowerCase()))
+    if (matched) {
+      return { ...matched, questionId: bq.id }
+    }
+    // Fallback parsing if table contents are custom
+    const parts = bq.questionText.split('|')
+    const difficultyPart = parts[0]?.replace('Difficulty:', '').trim() || 'Medium'
+    const questionBody = parts[1]?.trim() || bq.questionText
+    
+    return {
+      id: bq.id,
+      questionId: bq.id,
+      title: questionBody.split('\n')[0] || 'Technical Coding Problem',
+      difficulty: difficultyPart,
+      recommendedTimeSeconds: 1200,
+      description: questionBody,
+      example: 'Refer to problem description details.',
+      starterCodes: {
+        javascript: `// Write your solution here\nfunction solve() {\n  \n}`,
+        python: `def solve():\n    pass`,
+        java: `public class Solution {\n    public static void solve() {\n        \n    }\n}`,
+        cpp: `void solve() {\n    \n}`
+      }
+    }
+  })
+
+  const finalProblemsList = mappedProblems.length > 0 ? mappedProblems : PROBLEMS
+
+  const [selectedProblem, setSelectedProblem] = useState(finalProblemsList[0])
   const [language, setLanguage] = useState('javascript')
   const [editorTheme, setEditorTheme] = useState('vs-dark')
-  const [code, setCode] = useState(PROBLEMS[0].starterCodes.javascript)
+  const [code, setCode] = useState(finalProblemsList[0].starterCodes?.javascript || '')
   const [output, setOutput] = useState('Run your code to see logs and test results here.')
   const [isRunning, setIsRunning] = useState(false)
   const [isSubmitted, setIsSubmitted] = useState(false)
+  const [evalScore, setEvalScore] = useState(null)
+  const [evalFeedback, setEvalFeedback] = useState('')
 
   // Timer State
-  const [timeLeft, setTimeLeft] = useState(PROBLEMS[0].recommendedTimeSeconds)
+  const [timeLeft, setTimeLeft] = useState(finalProblemsList[0].recommendedTimeSeconds)
   const [isTimerActive, setIsTimerActive] = useState(true)
   const [showTimeUpModal, setShowTimeUpModal] = useState(false)
 
@@ -371,14 +411,6 @@ export default function TechnicalRound() {
   }
 
   const handleSubmitSolution = () => {
-    if ('speechSynthesis' in window) {
-      window.speechSynthesis.cancel()
-      setIsSpeaking(false)
-    }
-    if (recognitionRef.current) {
-      recognitionRef.current.stop()
-      setIsListening(false)
-    }
     setIsSubmitted(true)
     setIsTimerActive(false)
   }
@@ -518,7 +550,7 @@ export default function TechnicalRound() {
 
         {/* Problem Selector Tabs */}
         <div className="flex items-center gap-2 border-b border-stone-300 pb-2">
-          {PROBLEMS.map((prob) => (
+          {finalProblemsList.map((prob) => (
             <button
               key={prob.id}
               onClick={() => handleSelectProblem(prob)}
@@ -644,10 +676,7 @@ export default function TechnicalRound() {
                 <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
                 <div>
                   <p>Solution Submitted Successfully!</p>
-                  <p className="text-[11px] font-normal text-emerald-800">
-                    Time Taken: {formatTimer(selectedProblem.recommendedTimeSeconds - timeLeft)} · Score: 9.4/10
-                    {vocalNotes && ' · Communication bonus included (+0.5 for vocalized thought process)'}
-                  </p>
+                  <p className="text-[11px] font-normal text-emerald-800">Time Taken: {formatTimer(selectedProblem.recommendedTimeSeconds - timeLeft)} · Score: 9.4/10</p>
                 </div>
               </motion.div>
             )}
