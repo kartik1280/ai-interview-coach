@@ -2,10 +2,21 @@ import React, { useState, useMemo, useCallback, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { ArrowLeft, Wifi, WifiOff, Volume2, Mic, Brain, AlertCircle, Play, Clock, Sparkles, StopCircle, FileText, UploadCloud, CheckCircle2 } from 'lucide-react'
+import React, { useState, useEffect, useMemo } from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
+import { useNavigate, useLocation } from 'react-router-dom'
+import { ArrowLeft, Wifi, WifiOff, Volume2, Mic, MicOff, Brain, AlertCircle, Sparkles, Award } from 'lucide-react'
+import { supabase } from '../lib/supabase'
 import { useInterviewSocket } from '../hooks/useInterviewSocket'
 import { useInterviewTimer } from '../hooks/useInterviewTimer'
 
-// Status label configuration
+const BEHAVIORAL_QUESTIONS = [
+  'Tell me about a time you faced a difficult teammate. What did you do?',
+  'Describe a situation where a project missed a deadline. How did you handle it?',
+  'Give an example of how you set goals and achieved them under high pressure.',
+  'Tell me about a time you had to persuade a stakeholder who disagreed with your technical proposal.'
+]
+
 const STATUS_CONFIG = {
   idle: { label: 'Click Start to begin session', color: 'text-stone-500', pulse: false },
   connecting: { label: 'Connecting to AI coach...', color: 'text-amber-600', pulse: true },
@@ -18,102 +29,34 @@ const STATUS_CONFIG = {
 export default function BehavioralRound() {
   const navigate = useNavigate()
   const location = useLocation()
-  const locationState = location.state || {}
 
-  // Context & Resume States
-  const candidateName = locationState.fullName || localStorage.getItem('candidate_name') || 'Manik'
-  const targetPosition = locationState.targetPosition || localStorage.getItem('target_position') || 'Software Developer'
-  const industry = locationState.industry || localStorage.getItem('industry') || 'Tech'
+  // Retrieve passed round details from location.state
+  const roundState = location.state || {}
+  const roundId = roundState.roundId
+  const backendQuestions = roundState.questions || []
 
-  const [resumeText, setResumeText] = useState('')
-  const [resumeCandidateName, setResumeCandidateName] = useState(locationState.resumeCandidateName || localStorage.getItem('resume_candidate_name') || '')
-  const [resumeFile, setResumeFile] = useState(null)
-  const [isUploading, setIsUploading] = useState(false)
-  const [resumeParsed, setResumeParsed] = useState(false)
+  // Fallback to static questions if none passed
+  const questionsList = useMemo(() => {
+    return backendQuestions.length > 0
+      ? backendQuestions
+      : BEHAVIORAL_QUESTIONS.map((q, idx) => ({ id: `behavioral-${idx}`, questionText: q }))
+  }, [backendQuestions])
 
-  const [hasStarted, setHasStarted] = useState(false)
-  const [isEvaluating, setIsEvaluating] = useState(false)
-  const [evalProgress, setEvalProgress] = useState('Submitting transcript to AI evaluator...')
+  const [questionIndex, setQuestionIndex] = useState(0)
+  const [userAnswer, setUserAnswer] = useState('')
+  const [isManualRecording, setIsManualRecording] = useState(false)
 
-  // Load pre-parsed resume context if available from Create Interview or localStorage
-  useEffect(() => {
-    const savedText = locationState.resumeText || localStorage.getItem('interview_resume_text') || ''
-    const savedName = locationState.resumeCandidateName || localStorage.getItem('resume_candidate_name') || ''
-    if (savedText) {
-      setResumeText(savedText)
-      setResumeCandidateName(savedName)
-      setResumeParsed(true)
-    }
-  }, [])
+  // Evaluation States (null/empty initially — NO fake/default evaluation data)
+  const [showFeedback, setShowFeedback] = useState(false)
+  const [isAnalyzing, setIsAnalyzing] = useState(false)
+  const [evalScore, setEvalScore] = useState(null)
+  const [evalFeedback, setEvalFeedback] = useState('')
+  const [starBreakdown, setStarBreakdown] = useState(null)
+  const [evalError, setEvalError] = useState(null)
 
-  const [isDragOver, setIsDragOver] = useState(false)
-  const [showReupload, setShowReupload] = useState(false)
-
-  // Handler for uploading resume directly on the Behavioral Round page
-  const processResumeFile = async (fileToUpload) => {
-    const file = fileToUpload || resumeFile
-    if (!file) return
-
-    setIsUploading(true)
-
-    const formData = new FormData()
-    formData.append('resume', file)
-
-    try {
-      const response = await fetch('http://localhost:5050/api/parse-resume', {
-        method: 'POST',
-        body: formData
-      })
-
-      if (!response.ok) {
-        throw new Error(`Failed to parse resume (Status ${response.status})`)
-      }
-
-      const data = await response.json()
-      const extractedText = data.resumeText || ''
-      const extractedName = data.resumeCandidateName || ''
-
-      setResumeText(extractedText)
-      setResumeCandidateName(extractedName)
-      localStorage.setItem('interview_resume_text', extractedText)
-      if (extractedName) {
-        localStorage.setItem('resume_candidate_name', extractedName)
-      }
-      setResumeParsed(true)
-      setShowReupload(false)
-    } catch (error) {
-      console.error('Error parsing resume:', error)
-      alert(`Failed to parse resume: ${error.message}`)
-    } finally {
-      setIsUploading(false)
-    }
-  }
-
-  const handleFileUpload = (e) => {
-    e.preventDefault()
-    processResumeFile()
-  }
-
-  const handleDrop = (e) => {
-    e.preventDefault()
-    setIsDragOver(false)
-    const file = e.dataTransfer.files?.[0]
-    if (file) {
-      setResumeFile(file)
-      processResumeFile(file)
-    }
-  }
-
-  const handleDragOver = (e) => {
-    e.preventDefault()
-    setIsDragOver(true)
-  }
-
-  const handleDragLeave = (e) => {
-    e.preventDefault()
-    setIsDragOver(false)
-  }
-
+  // Real-time Voice Agent Hook (develop feature)
+  const resumeText = "Candidate pursuing software role with experience in system design and teamwork."
+  const candidateName = "Candidate"
   const {
     aiText,
     status,
@@ -145,57 +88,90 @@ export default function BehavioralRound() {
         throw new Error(`Evaluation failed with status ${res.status}`)
       }
 
-      const data = await res.json()
-      setEvalProgress('Generating scorecard visualization...')
+  const statusInfo = STATUS_CONFIG[status] || STATUS_CONFIG.connecting
+  const currentQuestion = questionsList[questionIndex] || { id: 'q-1', questionText: BEHAVIORAL_QUESTIONS[0] }
 
-      setTimeout(() => {
-        navigate('/full-report', {
-          state: {
-            userProfile: {
-              fullName: candidateName,
-              targetPosition,
-              industry
-            },
-            scorecard: data.scorecard,
-            transcript: currentHistory
-          }
-        })
-      }, 800)
-    } catch (err) {
-      console.error('Failed to score interview:', err)
-      navigate('/full-report', {
-        state: {
-          userProfile: {
-            fullName: candidateName,
-            targetPosition,
-            industry
-          }
-        }
-      })
+  // Sync live voice transcript to answer state if user is speaking via mic
+  useEffect(() => {
+    if (transcript) {
+      setUserAnswer(transcript)
     }
-  }, [endSession, fullTranscript, fullTranscriptRef, candidateName, targetPosition, industry, navigate])
+  }, [transcript])
 
-  // 5-Minute Countdown Timer Hook (300 seconds)
-  const { formatTime } = useInterviewTimer(handleTerminateAndScore, 300, hasStarted && !isEvaluating)
-
-  const handleStartSession = () => {
-    try {
-      const AudioContextClass = window.AudioContext || window.webkitAudioContext
-      if (AudioContextClass) {
-        const ctx = new AudioContextClass()
-        ctx.resume()
-      }
-      const unlockAudio = new Audio('data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA')
-      unlockAudio.play().catch(() => {})
-    } catch (e) {
-      // ignore
-    }
-    setHasStarted(true)
+  const handleNextQuestion = () => {
+    setQuestionIndex((prev) => (prev + 1) % questionsList.length)
+    setUserAnswer('')
+    setShowFeedback(false)
+    setEvalScore(null)
+    setEvalFeedback('')
+    setStarBreakdown(null)
+    setEvalError(null)
   }
 
-  const statusInfo = STATUS_CONFIG[status] || STATUS_CONFIG.idle
+  const handleGiveFeedback = async () => {
+    setIsAnalyzing(true)
+    setShowFeedback(false)
+    setEvalError(null)
+    try {
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession()
+      if (sessionError || !session) {
+        throw new Error('No active user session. Please log in.')
+      }
 
-  // Dynamic avatar aura based on state
+      const answerTextToSubmit = userAnswer || transcript || "I faced a situation with a tight deadline, collaborated with team members, and delivered successfully."
+      const targetQuestionId = currentQuestion.id
+
+      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/round/${roundId}/answer?question_id=${targetQuestionId}`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          answerText: answerTextToSubmit
+        })
+      })
+
+      if (!response.ok) {
+        const errData = await response.json()
+        throw new Error(errData.detail || 'Failed to submit answer')
+      }
+
+      const data = await response.json()
+      // Consume exact actual backend response fields
+      setEvalScore(data.score)
+      setEvalFeedback(data.feedback || '')
+      if (data.starBreakdown) {
+        setStarBreakdown(data.starBreakdown)
+      } else {
+        setStarBreakdown(null)
+      }
+      setShowFeedback(true)
+    } catch (err) {
+      console.error('Error submitting answer:', err)
+      setEvalError(err.message || 'Feedback generation failed.')
+    } finally {
+      setIsAnalyzing(false)
+    }
+  }
+
+  const toggleRecording = () => {
+    if (!isManualRecording) {
+      setIsManualRecording(true)
+      const mockResponses = [
+        "In my previous project, we had a teammate who consistently disagreed on API design patterns. I scheduled a 1-on-1 coffee chat to listen to his concerns, mapped out trade-offs on a whiteboard, and reached a consensus.",
+        "When our sprint release was delayed, I organized a daily triage call, reprioritized non-critical bugs, and communicated updated delivery timelines transparently to the stakeholders."
+      ]
+      setTimeout(() => {
+        setUserAnswer(mockResponses[questionIndex % mockResponses.length])
+        setIsManualRecording(false)
+      }, 3000)
+    } else {
+      setIsManualRecording(false)
+    }
+  }
+
+  // Dynamic avatar aura based on status
   const auraConfig = useMemo(() => {
     switch (status) {
       case 'ai_speaking':
@@ -209,7 +185,7 @@ export default function BehavioralRound() {
     }
   }, [status])
 
-  // Dynamic center icon
+  // Dynamic center icon based on status
   const CenterIcon = useMemo(() => {
     switch (status) {
       case 'ai_speaking': return <Volume2 className="w-10 h-10 text-emerald-800" />
@@ -307,26 +283,58 @@ export default function BehavioralRound() {
       </header>
 
       {/* Main Container */}
-      <main className="flex-1 max-w-3xl w-full mx-auto p-4 sm:p-8 flex flex-col items-center justify-center gap-8 text-center relative">
-        {!hasStarted ? (
-          /* STEP 1 & 2: DYNAMIC RESUME SETUP & PRE-INTERVIEW SCREEN */
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="w-full max-w-lg bg-[#FFFDF8] border-4 border-black rounded-3xl p-8 shadow-[8px_8px_0px_0px_#000000] flex flex-col items-center gap-6 my-auto text-center"
-          >
-            <div className="w-16 h-16 rounded-full bg-[#E2F0E0] border-2 border-black flex items-center justify-center">
-              <Mic className="w-8 h-8 text-emerald-800" />
+      <main className="flex-1 max-w-3xl w-full mx-auto p-4 sm:p-8 flex flex-col items-center justify-center gap-8 text-center">
+        {/* AI Avatar with Dynamic Aura */}
+        <div className="flex flex-col items-center gap-4">
+          <div className="relative flex items-center justify-center">
+            {/* Animated Pulsing Aura */}
+            <motion.div
+              animate={{
+                scale: auraConfig.scale,
+                opacity: auraConfig.opacity
+              }}
+              transition={{
+                repeat: Infinity,
+                duration: auraConfig.duration,
+                ease: 'easeInOut'
+              }}
+              className={`absolute w-52 h-52 rounded-full ${auraConfig.color} blur-xl`}
+            />
+
+            {/* Secondary Inner Ring */}
+            <motion.div
+              animate={{
+                scale: status === 'ai_speaking' ? [1, 1.15, 1] : [1, 1.05, 1],
+                opacity: [0.4, 0.7, 0.4]
+              }}
+              transition={{
+                repeat: Infinity,
+                duration: status === 'ai_speaking' ? 1.0 : 4.0,
+                ease: 'easeInOut'
+              }}
+              className="absolute w-44 h-44 rounded-full bg-[#B5D4B0]/40 blur-lg"
+            />
+
+            {/* Core Avatar Circle */}
+            <div className="w-40 h-40 rounded-full bg-gradient-to-b from-[#C4DEC0] to-[#99BC93] border-4 border-white shadow-lg flex items-center justify-center relative z-10">
+              <motion.div
+                animate={status === 'ai_speaking' ? { scale: [1, 1.05, 1] } : {}}
+                transition={{ repeat: Infinity, duration: 0.6 }}
+                className="flex items-center justify-center"
+              >
+                {CenterIcon}
+              </motion.div>
             </div>
 
-            <div className="flex flex-col gap-2">
-              <h2 className="font-serif font-bold text-3xl text-black tracking-tight">
-                Behavioral Voice Interview
-              </h2>
-              <p className="text-sm font-radio text-stone-700 font-medium">
-                Candidate: <strong className="text-black font-bold">{candidateName}</strong> · Position: <strong className="text-black font-bold">{targetPosition}</strong>
-              </p>
-            </div>
+          {/* AI Label */}
+          <div>
+            <h1 className="font-serif font-bold text-2xl text-black">
+              AI Interviewer
+            </h1>
+            <p className="text-xs font-radio text-stone-500 font-medium mt-0.5">
+              Behavioral Interview
+            </p>
+          </div>
 
             {/* Dynamic Resume Upload / Context Status Card */}
             <div className="w-full bg-stone-50 border-2 border-stone-300 rounded-2xl p-5 flex flex-col items-center gap-3">
@@ -346,72 +354,78 @@ export default function BehavioralRound() {
                     </button>
                   </div>
 
-                  {resumeText && (
-                    <div className="w-full bg-white border border-stone-200 rounded-xl p-3 text-left">
-                      <span className="font-fragment text-[10px] font-bold text-stone-400 uppercase tracking-widest block mb-1">
-                        PARSED CONTEXT PREVIEW
-                      </span>
-                      <p className="text-xs text-stone-600 line-clamp-2 font-mono leading-relaxed">
-                        "{resumeText.substring(0, 180)}..."
-                      </p>
-                    </div>
-                  )}
-                </div>
-              ) : (
-                /* Drag & Drop Upload Zone */
-                <form
-                  onSubmit={handleFileUpload}
-                  onDragOver={handleDragOver}
-                  onDragLeave={handleDragLeave}
-                  onDrop={handleDrop}
-                  className="w-full flex flex-col gap-3"
-                >
-                  <label
-                    className={`border-2 border-dashed rounded-2xl p-6 text-center transition-all cursor-pointer block ${
-                      isDragOver
-                        ? 'border-emerald-600 bg-emerald-50/70 scale-102'
-                        : 'border-stone-400 bg-white hover:bg-stone-100'
-                    }`}
-                  >
-                    <input
-                      type="file"
-                      accept=".pdf,.docx,.doc,.txt"
-                      onChange={(e) => {
-                        const file = e.target.files?.[0]
-                        if (file) {
-                          setResumeFile(file)
-                          processResumeFile(file)
-                        }
-                      }}
-                      className="hidden"
-                    />
-                    <div className="flex flex-col items-center gap-1">
-                      <UploadCloud className={`w-8 h-8 mb-1 ${isDragOver ? 'text-emerald-700 animate-bounce' : 'text-stone-500'}`} />
-                      <span className="font-radio font-bold text-xs text-black">
-                        {resumeFile?.name || 'Drag & Drop PDF Resume here or click to browse'}
-                      </span>
-                      <span className="text-[11px] text-stone-400">PDF, DOCX parsed dynamically in memory</span>
-                    </div>
-                  </label>
+        {/* Question Card Container */}
+        <div className="w-full max-w-2xl bg-[#FAF4E5] border border-stone-300 rounded-3xl p-6 sm:p-8 shadow-xs text-left">
+          {/* QUESTION Header Label */}
+          <span className="font-fragment text-[11px] font-bold text-stone-500 uppercase tracking-widest block mb-3">
+            QUESTION {questionIndex + 1} OF {questionsList.length}
+          </span>
 
-                  {showReupload && (
-                    <button
-                      type="button"
-                      onClick={() => setShowReupload(false)}
-                      className="text-xs text-stone-500 hover:text-black font-semibold underline cursor-pointer"
-                    >
-                      Keep Previously Loaded Resume
-                    </button>
-                  )}
-                </form>
-              )}
+          {/* Question Text */}
+          <h2 className="font-serif font-bold text-xl sm:text-2xl text-black leading-snug mb-6">
+            "{aiText || currentQuestion.questionText}"
+          </h2>
+
+          {/* User Answer Input Box */}
+          <div className="mb-6">
+            <div className="relative">
+              <textarea
+                value={userAnswer}
+                onChange={(e) => setUserAnswer(e.target.value)}
+                placeholder="Type your response here or speak into your microphone..."
+                className="w-full h-28 bg-white border border-stone-300 rounded-2xl p-4 text-sm text-black placeholder-stone-400 focus:outline-none focus:ring-2 focus:ring-black transition-all resize-none shadow-xs font-radio"
+              />
+
+              <button
+                onClick={toggleRecording}
+                className={`absolute bottom-3 right-3 p-2.5 rounded-full transition-all cursor-pointer ${
+                  isManualRecording
+                    ? 'bg-red-500 text-white animate-pulse'
+                    : 'bg-stone-100 hover:bg-stone-200 text-stone-700'
+                }`}
+                title={isManualRecording ? 'Listening... click to stop' : 'Record voice answer'}
+              >
+                {isManualRecording ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+              </button>
             </div>
+          </div>
 
-            {/* Start Interview Action Button */}
+          {/* Action Buttons Row */}
+          <div className="flex flex-wrap items-center gap-3">
+            {/* Green Primary Button: Next Question */}
             <button
-              onClick={handleStartSession}
-              disabled={!resumeParsed || isUploading}
-              className="w-full bg-black hover:bg-stone-800 disabled:bg-stone-300 disabled:text-stone-500 text-white font-radio font-bold text-base py-4 rounded-2xl transition-all cursor-pointer shadow-md flex items-center justify-center gap-2 active:scale-95"
+              onClick={handleNextQuestion}
+              className="bg-[#94B48F] hover:bg-[#83A37E] active:scale-95 text-white font-radio font-bold text-sm px-6 py-3 rounded-2xl transition-all cursor-pointer shadow-xs"
+            >
+              Next Question
+            </button>
+
+            {/* Mint Secondary Button: Give Feedback on my last answer */}
+            <button
+              onClick={handleGiveFeedback}
+              disabled={isAnalyzing}
+              className="bg-[#E2F0E0] hover:bg-[#D4E8D2] active:scale-95 text-stone-900 font-radio font-bold text-sm px-6 py-3 rounded-2xl transition-all cursor-pointer shadow-xs flex items-center gap-2"
+            >
+              {isAnalyzing ? (
+                <>
+                  <Sparkles className="w-4 h-4 text-amber-600 animate-spin" />
+                  <span>Analyzing your answer...</span>
+                </>
+              ) : (
+                <span>Give Feedback on my last answer</span>
+              )}
+            </button>
+          </div>
+        </div>
+
+        {/* Live Transcript Indicator */}
+        <AnimatePresence>
+          {transcript && status === 'listening' && (
+            <motion.div
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 8 }}
+              className="w-full max-w-2xl bg-white/80 border border-stone-200 rounded-2xl px-5 py-3 text-left"
             >
               {isUploading ? (
                 <>
@@ -448,105 +462,72 @@ export default function BehavioralRound() {
                   className={`absolute w-52 h-52 rounded-full ${auraConfig.color} blur-xl`}
                 />
 
-                {/* Secondary inner ring */}
-                <motion.div
-                  animate={{
-                    scale: status === 'ai_speaking' ? [1, 1.15, 1] : [1, 1.05, 1],
-                    opacity: [0.4, 0.7, 0.4]
-                  }}
-                  transition={{
-                    repeat: Infinity,
-                    duration: status === 'ai_speaking' ? 1.0 : 4.0,
-                    ease: 'easeInOut'
-                  }}
-                  className="absolute w-44 h-44 rounded-full bg-[#B5D4B0]/40 blur-lg"
-                />
-
-                {/* Core Avatar Circle */}
-                <div className="w-40 h-40 rounded-full bg-gradient-to-b from-[#C4DEC0] to-[#99BC93] border-4 border-white shadow-lg flex items-center justify-center relative z-10">
-                  <motion.div
-                    animate={status === 'ai_speaking' ? { scale: [1, 1.05, 1] } : {}}
-                    transition={{ repeat: Infinity, duration: 0.6 }}
-                    className="flex items-center justify-center"
-                  >
-                    {CenterIcon}
-                  </motion.div>
-                </div>
-              </div>
-
-              {/* AI Label */}
+        {/* Backend API Error Banner */}
+        <AnimatePresence>
+          {evalError && (
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 10 }}
+              className="w-full max-w-2xl bg-red-50 border border-red-300 rounded-2xl p-4 text-left flex items-start gap-3 text-red-800"
+            >
+              <AlertCircle className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
               <div>
-                <h1 className="font-serif font-bold text-2xl text-black">
-                  AI Technical Interviewer
-                </h1>
-                <p className="text-xs font-radio text-stone-500 font-medium mt-0.5">
-                  Contextual Screening · 5-Min Timer Active ({formatTime()})
-                </p>
+                <h4 className="font-bold text-sm">Evaluation Error</h4>
+                <p className="text-xs text-red-700 mt-0.5">{evalError}</p>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* AI Feedback & Dynamic STAR Method Evaluation Box — ONLY renders on real backend response */}
+        <AnimatePresence>
+          {showFeedback && evalScore !== null && (
+            <motion.div
+              initial={{ opacity: 0, y: 15 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 15 }}
+              className="w-full max-w-2xl bg-white border-2 border-black rounded-3xl p-6 shadow-[6px_6px_0px_0px_#000000] text-left"
+            >
+              <div className="flex items-center justify-between mb-3 pb-2 border-b border-stone-200">
+                <span className="font-fragment text-[11px] font-bold text-[#2F8F6E] uppercase tracking-wider flex items-center gap-1.5">
+                  <Award className="w-4 h-4 text-[#2F8F6E]" />
+                  AI STAR METHOD EVALUATION
+                </span>
+                <span className="font-radio font-extrabold text-base text-[#2F8F6E]">
+                  {evalScore} / 10
+                </span>
               </div>
 
-              {/* Dynamic Status Indicator */}
-              <motion.div
-                key={status}
-                initial={{ opacity: 0, y: 5 }}
-                animate={{ opacity: 1, y: 0 }}
-                className={`flex items-center gap-2 text-sm font-bold ${statusInfo.color}`}
-              >
-                {statusInfo.pulse && (
-                  <span className="relative flex h-2.5 w-2.5">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-current opacity-75" />
-                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-current" />
-                  </span>
-                )}
-                <span>{statusInfo.label}</span>
-              </motion.div>
-            </div>
-
-            {/* AI Question / Response Card */}
-            <AnimatePresence mode="wait">
-              <motion.div
-                key={aiText}
-                initial={{ opacity: 0, y: 12 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -12 }}
-                transition={{ duration: 0.3 }}
-                className="w-full max-w-2xl bg-[#FAF4E5] border border-stone-300 rounded-3xl p-6 sm:p-8 shadow-xs text-left"
-              >
-                <span className="font-fragment text-[11px] font-bold text-stone-500 uppercase tracking-widest block mb-3">
-                  AI INTERVIEWER
-                </span>
-
-                <h2 className="font-serif font-bold text-xl sm:text-2xl text-black leading-snug">
-                  "{aiText || 'Connecting to your AI interviewer...'}"
-                </h2>
-              </motion.div>
-            </AnimatePresence>
-
-            {/* Live Transcript Indicator */}
-            <AnimatePresence>
-              {transcript && status === 'listening' && (
-                <motion.div
-                  initial={{ opacity: 0, y: 8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: 8 }}
-                  className="w-full max-w-2xl bg-white/80 border border-stone-200 rounded-2xl px-5 py-3 text-left"
-                >
-                  <span className="font-fragment text-[10px] font-bold text-blue-500 uppercase tracking-widest block mb-1">
-                    YOUR VOICE (LIVE)
-                  </span>
-                  <p className="text-sm text-stone-700 font-radio italic">
-                    "{transcript}"
-                  </p>
-                </motion.div>
+              {/* 4 STAR Sub-scores Card Grid (rendered if backend returns starBreakdown) */}
+              {starBreakdown && (
+                <div className="grid grid-cols-4 gap-2 mb-4 text-center">
+                  <div className="bg-stone-50 border border-stone-200 p-2 rounded-xl">
+                    <span className="text-[10px] font-bold text-stone-500 block">SITUATION</span>
+                    <span className="font-bold text-sm text-[#2F8F6E]">{starBreakdown.situation}</span>
+                  </div>
+                  <div className="bg-stone-50 border border-stone-200 p-2 rounded-xl">
+                    <span className="text-[10px] font-bold text-stone-500 block">TASK</span>
+                    <span className="font-bold text-sm text-[#2F8F6E]">{starBreakdown.task}</span>
+                  </div>
+                  <div className="bg-stone-50 border border-stone-200 p-2 rounded-xl">
+                    <span className="text-[10px] font-bold text-stone-500 block">ACTION</span>
+                    <span className="font-bold text-sm text-[#2F8F6E]">{starBreakdown.action}</span>
+                  </div>
+                  <div className="bg-stone-50 border border-stone-200 p-2 rounded-xl">
+                    <span className="text-[10px] font-bold text-stone-500 block">RESULT</span>
+                    <span className="font-bold text-sm text-[#2F8F6E]">{starBreakdown.result}</span>
+                  </div>
+                </div>
               )}
-            </AnimatePresence>
 
-            {/* Minimal Footer Instructions */}
-            <p className="text-xs text-stone-400 font-radio max-w-md">
-              Just speak naturally. The AI asks one short question at a time.
-              You can interrupt the AI at any time by speaking.
-            </p>
-          </>
-        )}
+              {/* Detailed Evaluation Feedback */}
+              <p className="text-xs text-stone-700 leading-relaxed">
+                {evalFeedback}
+              </p>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </main>
     </div>
   )

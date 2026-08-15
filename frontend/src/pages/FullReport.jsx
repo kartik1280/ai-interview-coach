@@ -1,15 +1,17 @@
-import React, { useRef, useState } from 'react'
+import React, { useRef, useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { ArrowLeft, Download, Award, AlertTriangle, CheckCircle2, LayoutDashboard, Sliders, Sparkles, Brain, MessageSquare, Zap } from 'lucide-react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts'
 import html2canvas from 'html2canvas'
 import { jsPDF } from 'jspdf'
+import { supabase } from '../lib/supabase'
 
 // Score tier colors matching app rules
 const getScoreColor = (score) => {
-  if (score >= 8.5) return '#2F8F6E' // Green
-  if (score >= 7.0) return '#B8862E' // Amber
+  const num = parseFloat(score)
+  if (num >= 8.5) return '#2F8F6E' // Green
+  if (num >= 7.0) return '#B8862E' // Amber
   return '#C0533F' // Red / Coral
 }
 
@@ -17,54 +19,74 @@ export default function FullReport() {
   const navigate = useNavigate()
   const location = useLocation()
   const reportRef = useRef(null)
+  
+  const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState(null)
   const [isExporting, setIsExporting] = useState(false)
 
-  // Data passed from BehavioralRound or fallback mock data
-  const dataState = location.state || {}
-  
-  const userProfile = dataState.userProfile || {
-    fullName: localStorage.getItem('candidate_name') || 'Manik',
-    targetPosition: localStorage.getItem('target_position') || 'Software Developer',
-    industry: localStorage.getItem('industry') || 'Tech'
-  }
+  // Onboarding profile
+  const [userProfile, setUserProfile] = useState({
+    fullName: 'Loading...',
+    targetPosition: '',
+    industry: ''
+  })
 
-  const scorecard = dataState.scorecard || {
-    overall_score: 8.5,
-    technical_accuracy: {
-      score: 8.8,
-      feedback: 'Solid understanding of core framework architecture, virtual DOM diffing, and modern build tools like Vite.'
-    },
-    sentence_formation: {
-      score: 8.0,
-      feedback: 'Concise, clear, and well-structured responses. Minimal use of filler words.'
-    },
-    communication_confidence: {
-      score: 8.7,
-      feedback: 'Spoke with steady pacing and natural conversational flow under time pressure.'
-    },
-    suggested_improvement: 'Deepen explanation of custom bundler configurations and asynchronous state reconciliation.'
-  }
+  // State arrays populated by API
+  const [rounds, setRounds] = useState([])
+  const [history, setHistory] = useState([])
+  const [streak, setStreak] = useState(0)
+  const [overallScore, setOverallScore] = useState(0.0)
+  const [areasToImprove, setAreasToImprove] = useState('')
 
-  // Recharts chart dataset mapping LLM evaluation metrics
-  const completedChartData = [
-    {
-      name: 'Tech Accuracy',
-      score: scorecard.technical_accuracy?.score || 8.5,
-      fillColor: getScoreColor(scorecard.technical_accuracy?.score || 8.5)
-    },
-    {
-      name: 'Sentence Structure',
-      score: scorecard.sentence_formation?.score || 8.0,
-      fillColor: getScoreColor(scorecard.sentence_formation?.score || 8.0)
-    },
-    {
-      name: 'Confidence',
-      score: scorecard.communication_confidence?.score || 8.7,
-      fillColor: getScoreColor(scorecard.communication_confidence?.score || 8.7)
+  useEffect(() => {
+    const fetchReportData = async () => {
+      try {
+        const { data: { session }, error: sessionError } = await supabase.auth.getSession()
+        if (sessionError || !session) {
+          throw new Error('No active user session found. Please log in.')
+        }
+
+        const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/report/latest`, {
+          headers: {
+            'Authorization': `Bearer ${session.access_token}`
+          }
+        })
+
+        if (!response.ok) {
+          const errData = await response.json()
+          throw new Error(errData.detail || 'Failed to load report data')
+        }
+
+        const data = await response.json()
+        setUserProfile({
+          fullName: data.fullName,
+          targetPosition: data.targetPosition,
+          industry: data.industry
+        })
+        setRounds(data.rounds)
+        setHistory(data.recentHistory)
+        setStreak(data.streak)
+        setOverallScore(data.overallScore)
+        setAreasToImprove(data.areasToImprove)
+      } catch (err) {
+        console.error('Error fetching report:', err)
+        setError(err.message)
+      } finally {
+        setIsLoading(false)
+      }
     }
-  ]
 
-  const overallScore = scorecard.overall_score || 8.5
+    fetchReportData()
+  }, [])
+
+
+  // Filter completed round types for the Recharts comparison chart
+  const completedChartData = rounds.map((r) => ({
+    name: r.name.replace(' round', ''),
+    score: r.score,
+    fillColor: getScoreColor(r.score)
+  }))
+
   const overallColor = getScoreColor(overallScore)
 
   // Export to PDF Handler
@@ -105,6 +127,14 @@ export default function FullReport() {
     } finally {
       setIsExporting(false)
     }
+  }
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-[#FCF5E2] flex items-center justify-center font-radio">
+        <div className="text-stone-600 font-bold">Loading your report...</div>
+      </div>
+    )
   }
 
   return (

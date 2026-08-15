@@ -42,68 +42,74 @@ export default function CreateInterview() {
     setIsGenerating(true)
 
     try {
-      let parsedResumeText = ''
-      let parsedResumeCandidateName = ''
+      // 1. Get the current session token
+      const {
+        data: { session },
+        error: sessionError
+      } = await supabase.auth.getSession()
 
-      // 1. Send uploaded resume to Express Backend /api/parse-resume for PDF text extraction
-      if (file?.file) {
-        try {
-          const apiFormData = new FormData()
-          apiFormData.append('resume', file.file)
-
-          const parseRes = await fetch('http://localhost:5050/api/parse-resume', {
-            method: 'POST',
-            body: apiFormData
-          })
-
-          if (parseRes.ok) {
-            const parseData = await parseRes.json()
-            if (parseData.resumeText) {
-              parsedResumeText = parseData.resumeText
-              parsedResumeCandidateName = parseData.resumeCandidateName || ''
-              console.log('✅ Resume parsed successfully:', parsedResumeText.substring(0, 100) + '...')
-            }
-          }
-        } catch (parseErr) {
-          console.warn('Backend parse resume service notice:', parseErr.message)
-        }
+      if (sessionError || !session) {
+        throw new Error('No active user session found. Please log in again.')
       }
 
-      // Store context in localStorage for seamless round persistence
-      if (parsedResumeText) {
-        localStorage.setItem('interview_resume_text', parsedResumeText)
-      }
-      if (parsedResumeCandidateName) {
-        localStorage.setItem('resume_candidate_name', parsedResumeCandidateName)
-      }
-      localStorage.setItem('candidate_name', formData.fullName || 'Candidate')
-      localStorage.setItem('target_position', formData.targetPosition || 'Software Developer')
-      localStorage.setItem('industry', formData.industry || 'Tech')
+      const token = session.access_token
 
-      // 2. Optional Supabase integration if logged in
-      try {
-        const { data: { user } } = await supabase.auth.getUser()
-        if (user && file?.file) {
-          const filePath = `${user.id}/${crypto.randomUUID()}-${file.file.name}`
-          await supabase.storage.from('resumes').upload(filePath, file.file)
-        }
-      } catch (sbErr) {
-        // Continue gracefully for demo users
-        console.log('Supabase sync status:', sbErr.message)
+      // 2. Make sure a resume has actually been selected
+      if (!file?.file) {
+        throw new Error('Please upload your resume first')
       }
 
+      // 3. Upload the file to the backend
+      const resumeFormData = new FormData()
+      resumeFormData.append('file', file.file)
+
+      const uploadResponse = await fetch(`${import.meta.env.VITE_API_BASE_URL}/resume/upload`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        },
+        body: resumeFormData
+      })
+
+      if (!uploadResponse.ok) {
+        const errData = await uploadResponse.json()
+        throw new Error(errData.detail || 'Failed to upload and parse resume')
+      }
+
+      const resumeData = await uploadResponse.json()
+
+      // 4. Connect profile details on backend
+      const profileResponse = await fetch(`${import.meta.env.VITE_API_BASE_URL}/interview/create`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          fullName: formData.fullName,
+          targetPosition: formData.targetPosition,
+          industry: formData.industry
+        })
+      })
+
+      if (!profileResponse.ok) {
+        const errData = await profileResponse.json()
+        throw new Error(errData.detail || 'Failed to initialize your profile details')
+      }
+
+      const profileData = await profileResponse.json()
+
+      // 5. Everything succeeded
       setIsGenerating(false)
       setGenerated(true)
 
-      // 3. Continue to dashboard
+      // 6. Continue to dashboard with backend data
       setTimeout(() => {
         navigate('/dashboard', {
           state: {
-            fullName: formData.fullName,
-            targetPosition: formData.targetPosition,
-            industry: formData.industry,
-            resumeText: parsedResumeText,
-            resumeCandidateName: parsedResumeCandidateName
+            fullName: profileData.fullName,
+            targetPosition: profileData.targetPosition,
+            industry: profileData.industry
           }
         })
       }, 1200)
