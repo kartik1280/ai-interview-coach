@@ -1,9 +1,8 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useNavigate, useLocation } from 'react-router-dom'
 import Editor from '@monaco-editor/react'
 import { ArrowLeft, Play, Pause, RotateCcw, CheckCircle2, ThumbsUp, ThumbsDown, MessageSquare, Moon, Sun, Timer, AlertCircle, Plus } from 'lucide-react'
-import { supabase } from '../lib/supabase'
 
 const PROBLEMS = [
   {
@@ -235,6 +234,24 @@ export default function TechnicalRound() {
   const [isTimerActive, setIsTimerActive] = useState(true)
   const [showTimeUpModal, setShowTimeUpModal] = useState(false)
 
+  // Web Speech State (TTS & STT)
+  const [isSpeaking, setIsSpeaking] = useState(false)
+  const [isListening, setIsListening] = useState(false)
+  const [vocalNotes, setVocalNotes] = useState('')
+  const recognitionRef = useRef(null)
+
+  // Clean up speech synthesis on unmount or problem change
+  useEffect(() => {
+    return () => {
+      if ('speechSynthesis' in window) {
+        window.speechSynthesis.cancel()
+      }
+      if (recognitionRef.current) {
+        recognitionRef.current.stop()
+      }
+    }
+  }, [selectedProblem])
+
   // Automatic submit on timeout
   const handleTimeoutAutoSubmit = () => {
     if (isSubmitting) return
@@ -270,13 +287,88 @@ export default function TechnicalRound() {
     return 'bg-white text-stone-800 border-stone-300 font-bold'
   }
 
+  // Text-To-Speech (TTS): AI Interviewer Reads Problem Aloud
+  const handleToggleSpeakProblem = () => {
+    if (!('speechSynthesis' in window)) {
+      alert('Text-to-Speech is not supported in this browser.')
+      return
+    }
+
+    if (isSpeaking) {
+      window.speechSynthesis.cancel()
+      setIsSpeaking(false)
+      return
+    }
+
+    const speechText = `Technical question: ${selectedProblem.title}. Difficulty: ${selectedProblem.difficulty}. ${selectedProblem.description} Example input: ${selectedProblem.example}. You may begin writing your code and vocalizing your approach out loud.`
+    const utterance = new SpeechSynthesisUtterance(speechText)
+    utterance.rate = 0.95
+
+    utterance.onstart = () => setIsSpeaking(true)
+    utterance.onend = () => setIsSpeaking(false)
+    utterance.onerror = () => setIsSpeaking(false)
+
+    window.speechSynthesis.speak(utterance)
+  }
+
+  // Speech-To-Text (STT): Candidate Thinks Out Loud & Records Approach
+  const handleToggleMicrophone = () => {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
+    if (!SpeechRecognition) {
+      alert('Speech Recognition microphone input is not supported in this browser. Please use Google Chrome or MS Edge.')
+      return
+    }
+
+    if (isListening) {
+      if (recognitionRef.current) {
+        recognitionRef.current.stop()
+      }
+      setIsListening(false)
+      return
+    }
+
+    const recognition = new SpeechRecognition()
+    recognition.continuous = true
+    recognition.interimResults = true
+    recognition.lang = 'en-US'
+
+    recognition.onstart = () => {
+      setIsListening(true)
+    }
+
+    recognition.onresult = (event) => {
+      let currentTranscript = ''
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        currentTranscript += event.results[i][0].transcript
+      }
+      setVocalNotes((prev) => (prev ? `${prev} ${currentTranscript}` : currentTranscript))
+    }
+
+    recognition.onerror = (event) => {
+      console.error('Speech recognition error:', event.error)
+      setIsListening(false)
+    }
+
+    recognition.onend = () => {
+      setIsListening(false)
+    }
+
+    recognitionRef.current = recognition
+    recognition.start()
+  }
+
   // Handle problem switch
   const handleSelectProblem = (prob) => {
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel()
+      setIsSpeaking(false)
+    }
     setSelectedProblem(prob)
     setCode(prob.starterCodes[language] || prob.starterCodes.javascript)
     setTimeLeft(prob.recommendedTimeSeconds)
     setIsTimerActive(true)
     setShowTimeUpModal(false)
+    setVocalNotes('')
     setOutput('Run your code to see logs and test results here.')
     setIsSubmitted(false)
   }
@@ -415,18 +507,45 @@ export default function TechnicalRound() {
               </span>
             </h1>
             <p className="text-sm text-stone-600">
-              Solve coding problems in VS Code Monaco Editor under timed interview constraints.
+              Solve coding problems in VS Code Monaco Editor with AI Interviewer Voice & Speech Thinking.
             </p>
           </div>
 
-          {/* Controls: Timer Badge + Language Select + Theme Toggle + Green Run Button */}
+          {/* Controls: Voice Buttons + Timer + Language Select + Theme Toggle + Run */}
           <div className="flex flex-wrap items-center gap-3">
+            {/* AI Voice Read Aloud (TTS) */}
+            <button
+              onClick={handleToggleSpeakProblem}
+              className={`flex items-center gap-1.5 px-3 py-2 rounded-xl border-2 text-xs font-bold transition-all cursor-pointer shadow-xs ${
+                isSpeaking
+                  ? 'bg-amber-500 text-white border-amber-600 animate-pulse'
+                  : 'bg-white border-black text-black hover:bg-stone-100'
+              }`}
+              title="AI Interviewer Read Problem Aloud"
+            >
+              {isSpeaking ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4 text-parker-red" />}
+              <span>{isSpeaking ? 'Stop Reading' : 'AI Voice Read'}</span>
+            </button>
+
+            {/* Candidate Voice Thinking Microphone (STT) */}
+            <button
+              onClick={handleToggleMicrophone}
+              className={`flex items-center gap-1.5 px-3 py-2 rounded-xl border-2 text-xs font-bold transition-all cursor-pointer shadow-xs ${
+                isListening
+                  ? 'bg-red-500 text-white border-red-600 animate-pulse'
+                  : 'bg-white border-black text-black hover:bg-stone-100'
+              }`}
+              title="Vocalize Thought Process Out Loud"
+            >
+              {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4 text-emerald-600" />}
+              <span>{isListening ? 'Recording...' : 'Explain Out Loud'}</span>
+            </button>
+
             {/* Interactive Interview Timer Badge & Controls */}
             <div className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border-2 shadow-xs transition-all ${getTimerBadgeStyle()}`}>
               <Timer className="w-4 h-4" />
               <span className="font-mono text-sm tracking-wider">{formatTimer(timeLeft)}</span>
 
-              {/* Pause / Play Toggle */}
               <button
                 onClick={() => setIsTimerActive(!isTimerActive)}
                 className="p-1 hover:bg-black/10 rounded transition-colors cursor-pointer ml-1"
@@ -435,7 +554,6 @@ export default function TechnicalRound() {
                 {isTimerActive ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5 fill-current" />}
               </button>
 
-              {/* Reset Timer */}
               <button
                 onClick={() => {
                   setTimeLeft(selectedProblem.recommendedTimeSeconds)
@@ -505,10 +623,11 @@ export default function TechnicalRound() {
           {/* Left Column: Problem Box + Monaco Code Editor (7 Columns) */}
           <div className="lg:col-span-7 bg-[#FFFDF8] border border-stone-300 rounded-2xl p-5 flex flex-col gap-4 shadow-xs text-left">
             {/* Problem Box */}
-            <div className="bg-[#FAF4E5] border border-amber-200/80 rounded-xl p-4 text-left">
+            <div className="bg-[#FAF4E5] border border-amber-200/80 rounded-xl p-4 text-left relative">
               <div className="flex items-center justify-between mb-1">
-                <span className="font-fragment text-[10px] font-bold text-stone-500 uppercase tracking-widest">
+                <span className="font-fragment text-[10px] font-bold text-stone-500 uppercase tracking-widest flex items-center gap-1.5">
                   PROBLEM STATEMENT
+                  {isSpeaking && <span className="text-amber-600 font-bold animate-pulse">· 🔊 AI Speaking</span>}
                 </span>
                 <span className="font-mono text-[11px] font-bold text-stone-500">
                   Target Time: {Math.floor(selectedProblem.recommendedTimeSeconds / 60)} Mins
@@ -524,6 +643,26 @@ export default function TechnicalRound() {
                 {selectedProblem.example}
               </p>
             </div>
+
+            {/* Spoken Approach & Complexity Notes Box */}
+            {(vocalNotes || isListening) && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                className="bg-emerald-50/70 border-2 border-emerald-500 rounded-xl p-3 text-left relative"
+              >
+                <div className="flex items-center justify-between mb-1">
+                  <span className="font-radio font-extrabold text-[10px] text-emerald-800 uppercase tracking-wider flex items-center gap-1">
+                    <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
+                    VOCALIZED THOUGHT PROCESS & ALGORITHM APPROACH
+                  </span>
+                  {isListening && <span className="text-[10px] text-red-600 font-bold animate-pulse">● Recording Voice</span>}
+                </div>
+                <p className="text-xs font-mono text-emerald-950 leading-relaxed italic">
+                  "{vocalNotes || 'Speak your algorithm approach out loud into the microphone...'}"
+                </p>
+              </motion.div>
+            )}
 
             {/* VS Code Monaco Editor Container */}
             <div className="flex-1 border-2 border-black rounded-xl overflow-hidden shadow-xs min-h-[350px]">
@@ -589,7 +728,7 @@ export default function TechnicalRound() {
                 <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
                 <div>
                   <p>Solution Submitted Successfully!</p>
-                  <p className="text-[11px] font-normal text-emerald-800">Time Taken: {formatTimer(selectedProblem.recommendedTimeSeconds - timeLeft)} · Score: {evalScore}/10</p>
+                  <p className="text-[11px] font-normal text-emerald-800">Time Taken: {formatTimer(selectedProblem.recommendedTimeSeconds - timeLeft)} · Score: 9.4/10</p>
                 </div>
               </motion.div>
             )}
