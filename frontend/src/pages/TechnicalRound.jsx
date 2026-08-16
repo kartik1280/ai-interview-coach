@@ -301,6 +301,7 @@ export default function TechnicalRound() {
   const [isSubmitted, setIsSubmitted] = useState(false)
   const [evalScore, setEvalScore] = useState(null)
   const [evalFeedback, setEvalFeedback] = useState('')
+  const [analysisDetails, setAnalysisDetails] = useState(null)
   const [bookmarkedProblems, setBookmarkedProblems] = useState({})
   const [submittedSolutions, setSubmittedSolutions] = useState({})
   const [copiedToast, setCopiedToast] = useState(false)
@@ -446,6 +447,7 @@ export default function TechnicalRound() {
     setIsTimerActive(true)
     setShowTimeUpModal(false)
     setVocalNotes('')
+    setAnalysisDetails(null)
     setOutput('Run your code to see logs and test results here.')
     setIsSubmitted(false)
   }
@@ -455,12 +457,14 @@ export default function TechnicalRound() {
     const newLang = e.target.value
     setLanguage(newLang)
     setCode(selectedProblem.starterCodes[newLang] || selectedProblem.starterCodes.javascript)
+    setAnalysisDetails(null)
     setOutput('Language updated. Click Run to evaluate code.')
   }
 
   // Code Execution Engine
   const handleRunCode = () => {
     setIsRunning(true)
+    setAnalysisDetails(null)
     setOutput(`Compiling & executing ${language.toUpperCase()}...`)
 
     setTimeout(() => {
@@ -480,23 +484,19 @@ export default function TechnicalRound() {
           runFn(customConsole)
 
           if (logs.length > 0) {
-            setOutput(`Output Logs:\n${logs.join('\n')}\n\n✓ All test cases passed!`)
+            setOutput(`Output Logs:\n${logs.join('\n')}\n\n✓ JavaScript execution completed cleanly.`)
           } else {
-            setOutput('Code executed successfully with no console logs.')
+            setOutput('JavaScript code executed successfully with no console logs.')
           }
         } catch (err) {
           setOutput(`Execution Error:\n${err.message}`)
         }
-      } else if (language === 'python') {
-        setOutput(`Output Logs:\n[0, 1]\n\n✓ Python 3 Execution Complete: All test cases passed!`)
-      } else if (language === 'java') {
-        setOutput(`Output Logs:\n[0, 1]\n\n✓ Java Solution Compiled & Executed: All assertions passed!`)
-      } else if (language === 'cpp') {
-        setOutput(`Output Logs:\n[0, 1]\n\n✓ C++20 g++ Binary Compiled Successfully: All test cases passed!`)
+      } else {
+        setOutput(`[LOCAL CODE PREVIEW - ${language.toUpperCase()}]\n\nIn-browser instant execution is supported for JavaScript.\nFor ${language.toUpperCase()}, click 'Lock / Submit Problem Solution' below to run full AI Code Analysis & Asymptotic Complexity Review.`)
       }
 
       setIsRunning(false)
-    }, 500)
+    }, 400)
   }
 
   const handleSubmitSolution = async (openModal = false) => {
@@ -504,7 +504,7 @@ export default function TechnicalRound() {
     setIsSubmitting(true)
     setIsSubmitted(false)
     setIsRunning(true)
-    setOutput('Submitting your solution and evaluating...')
+    setOutput('Submitting your solution and generating AI code analysis...')
     
     try {
       const { data: { session }, error: sessionError } = await supabase.auth.getSession()
@@ -533,6 +533,7 @@ export default function TechnicalRound() {
       const data = await res.json()
       setEvalScore(data.score)
       setEvalFeedback(data.feedback)
+      setAnalysisDetails(data.analysisDetails || null)
       setIsSubmitted(true)
       setSubmittedSolutions(prev => ({ ...prev, [qId]: true }))
       setOutput(`✓ AI Evaluation Completed (${language.toUpperCase()})\n\nMarks / Score: ${data.score} / 10\n\n========================================\nEVALUATION & ERROR DESCRIPTION\n========================================\n${data.feedback}`)
@@ -794,10 +795,142 @@ export default function TechnicalRound() {
               OUTPUT CONSOLE
             </span>
 
-            {/* Output Display Terminal */}
-            <div className="flex-1 bg-white border border-stone-300 rounded-xl p-3.5 font-mono text-xs text-stone-800 overflow-auto whitespace-pre-wrap min-h-[300px] leading-relaxed">
-              {output}
-            </div>
+            {/* Output Display Terminal / Structured AI Evaluation Card */}
+            {analysisDetails ? (
+              analysisDetails.aiEvaluationAvailable === false ? (
+                <div className="flex-1 bg-amber-50/90 border-2 border-amber-300 rounded-xl p-4 space-y-3 font-radio text-xs">
+                  <div className="flex items-center gap-2 text-amber-900 font-extrabold text-sm border-b border-amber-200 pb-2">
+                    <AlertCircle className="w-5 h-5 text-amber-600 shrink-0" />
+                    <span>AI EVALUATION UNAVAILABLE</span>
+                  </div>
+                  <p className="text-stone-800 text-xs leading-relaxed">
+                    The AI service could not evaluate your submission right now. Please try again.
+                  </p>
+                  <button
+                    onClick={() => handleSubmitSolution(false)}
+                    disabled={isSubmitting}
+                    className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl text-xs transition-all cursor-pointer shadow-xs flex items-center gap-1.5"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isSubmitting ? 'animate-spin' : ''}`} />
+                    <span>Retry AI Evaluation</span>
+                  </button>
+                </div>
+              ) : (
+                <div className="flex-1 bg-white border border-stone-300 rounded-xl p-3.5 space-y-3 font-radio text-xs overflow-auto min-h-[300px]">
+                  {/* Verdict & Score Header */}
+                <div className="flex items-center justify-between gap-2 p-2.5 rounded-lg bg-stone-50 border border-stone-200">
+                  <div className="flex items-center gap-2">
+                    <span className={`px-2.5 py-1 rounded-md font-extrabold text-xs border ${
+                      analysisDetails.verdict?.includes('CORRECT') && !analysisDetails.verdict?.includes('INCORRECT')
+                        ? 'bg-emerald-100 text-emerald-900 border-emerald-400'
+                        : 'bg-red-100 text-red-900 border-red-400'
+                    }`}>
+                      {analysisDetails.verdict || (evalScore >= 7.5 ? 'CORRECT ANSWER ✅' : 'INCORRECT ANSWER ❌')}
+                    </span>
+                    <span className="px-2 py-0.5 bg-stone-200 border border-stone-300 rounded text-stone-700 font-mono text-[10px] font-bold">
+                      {analysisDetails.language || language.toUpperCase()}
+                    </span>
+                  </div>
+                  <span className="font-extrabold text-stone-900 text-xs">
+                    Score: {analysisDetails.score !== undefined ? analysisDetails.score : evalScore}/10
+                  </span>
+                </div>
+
+                {/* Summary */}
+                <div className="p-2.5 bg-stone-50 border border-stone-200 rounded-lg">
+                  <span className="font-bold text-stone-500 block text-[10px] uppercase mb-0.5">EVALUATION SUMMARY</span>
+                  <p className="text-stone-800 text-xs leading-relaxed">{analysisDetails.summary}</p>
+                </div>
+
+                {/* Code Analysis Grid */}
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="p-2 bg-stone-50 border border-stone-200 rounded-lg">
+                    <div className="flex items-center justify-between mb-0.5">
+                      <span className="font-bold text-stone-500 text-[10px] uppercase">SYNTAX CHECK</span>
+                      <span className={`text-[10px] font-bold px-1.5 py-0.2 rounded ${analysisDetails.syntax?.correct ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'}`}>
+                        {analysisDetails.syntax?.correct ? 'PASS' : 'FAIL'}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-stone-700 leading-tight">{analysisDetails.syntax?.details}</p>
+                  </div>
+
+                  <div className="p-2 bg-stone-50 border border-stone-200 rounded-lg">
+                    <div className="flex items-center justify-between mb-0.5">
+                      <span className="font-bold text-stone-500 text-[10px] uppercase">ALGORITHMIC LOGIC</span>
+                      <span className={`text-[10px] font-bold px-1.5 py-0.2 rounded ${analysisDetails.correctness?.correct ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'}`}>
+                        {analysisDetails.correctness?.correct ? 'PASS' : 'FAIL'}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-stone-700 leading-tight">{analysisDetails.correctness?.details}</p>
+                  </div>
+                </div>
+
+                {/* Errors & Issues */}
+                {analysisDetails.errors && analysisDetails.errors.length > 0 && (
+                  <div className="p-2.5 bg-red-50 border border-red-200 rounded-lg">
+                    <span className="font-bold text-red-900 block text-[10px] uppercase mb-1">DETECTED BUGS & ERRORS</span>
+                    <ul className="space-y-1 text-[11px] text-red-950">
+                      {analysisDetails.errors.map((err, idx) => (
+                        <li key={idx} className="flex flex-col gap-0.5 border-b border-red-100 pb-1 last:border-0 last:pb-0">
+                          <span className="font-bold text-red-900">• [{err.type?.toUpperCase() || 'ERROR'}] {err.description}</span>
+                          {err.suggestion && <span className="text-[10px] text-red-700 italic">Fix Idea: {err.suggestion}</span>}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {/* Edge Cases Tested */}
+                {analysisDetails.edgeCases && analysisDetails.edgeCases.length > 0 && (
+                  <div className="p-2.5 bg-stone-50 border border-stone-200 rounded-lg">
+                    <span className="font-bold text-stone-500 block text-[10px] uppercase mb-1">EDGE CASES TESTED</span>
+                    <div className="space-y-1 text-[11px]">
+                      {analysisDetails.edgeCases.map((ec, idx) => (
+                        <div key={idx} className="flex items-center justify-between py-0.5 border-b border-stone-100 last:border-0">
+                          <span className="text-stone-700">{ec.case}</span>
+                          <span className={`font-bold text-[9px] px-1.5 py-0.2 rounded ${ec.result === 'passed' ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'}`}>
+                            {ec.result?.toUpperCase()}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Complexity Analysis */}
+                {analysisDetails.complexity && (
+                  <div className="p-2.5 bg-stone-50 border border-stone-200 rounded-lg">
+                    <span className="font-bold text-stone-500 block text-[10px] uppercase mb-1">ASYMPTOTIC COMPLEXITY</span>
+                    <div className="flex items-center gap-2 text-[11px] font-mono font-bold mb-1">
+                      <span className="bg-emerald-100 text-emerald-900 border border-emerald-300 px-2 py-0.5 rounded">
+                        Time: {analysisDetails.complexity.time || 'O(N)'}
+                      </span>
+                      <span className="bg-blue-100 text-blue-900 border border-blue-300 px-2 py-0.5 rounded">
+                        Space: {analysisDetails.complexity.space || 'O(1)'}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-stone-600 leading-tight">{analysisDetails.complexity.assessment}</p>
+                  </div>
+                )}
+
+                {/* Suggested Optimizations */}
+                {analysisDetails.improvements && analysisDetails.improvements.length > 0 && (
+                  <div className="p-2.5 bg-emerald-50 border border-emerald-200 rounded-lg">
+                    <span className="font-bold text-emerald-900 block text-[10px] uppercase mb-1">SUGGESTED OPTIMIZATIONS</span>
+                    <ul className="list-disc list-inside text-[11px] text-emerald-950 space-y-0.5">
+                      {analysisDetails.improvements.map((imp, idx) => (
+                        <li key={idx}>{imp}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                </div>
+              )
+            ) : (
+              <div className="flex-1 bg-white border border-stone-300 rounded-xl p-3.5 font-mono text-xs text-stone-800 overflow-auto whitespace-pre-wrap min-h-[300px] leading-relaxed">
+                {output}
+              </div>
+            )}
 
             {isSubmitted && (
               <motion.div

@@ -153,7 +153,12 @@ export default function AptitudeRound() {
     try {
       const { data: { session } } = await supabase.auth.getSession()
       const selectedOptText = selectedOption !== null ? currentQ.options[selectedOption] : null
-      const res = await fetch(`${import.meta.env.VITE_API_BASE_URL}/round/explain-aptitude`, {
+
+      const endpoint = roundId
+        ? `${import.meta.env.VITE_API_BASE_URL}/round/${roundId}/question/${currentQId}/explanation`
+        : `${import.meta.env.VITE_API_BASE_URL}/round/explain-aptitude`
+
+      const res = await fetch(endpoint, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${session?.access_token || ''}`,
@@ -162,15 +167,16 @@ export default function AptitudeRound() {
         body: JSON.stringify({
           questionText: `${currentQ.title} ${currentQ.description || ''}`,
           options: currentQ.options,
-          selectedOption: selectedOptText
+          selectedOption: selectedOptText,
+          questionId: currentQId
         })
       })
       if (res.ok) {
         const data = await res.json()
-        if (data.explanation) {
+        if (data.explanation || data.details) {
           setAiExplanations(prev => ({
             ...prev,
-            [currentQId]: data.explanation
+            [currentQId]: data
           }))
         }
       }
@@ -579,12 +585,94 @@ export default function AptitudeRound() {
                   {isExplaining ? (
                     <div className="py-4 flex items-center gap-2 text-stone-600 text-xs font-radio font-bold">
                       <Sparkles className="w-4 h-4 text-amber-500 animate-spin" />
-                      <span>Generating step-by-step AI explanation...</span>
+                      <span>AI is analyzing this question...</span>
                     </div>
                   ) : (
-                    <p className="font-radio text-xs text-stone-800 leading-relaxed whitespace-pre-wrap mb-3">
-                      {aiExplanations[currentQId] || currentQ.explanation}
-                    </p>
+                    <div>
+                      {typeof aiExplanations[currentQId] === 'object' && aiExplanations[currentQId]?.aiEvaluationAvailable === false ? (
+                        <div className="p-3 bg-amber-50 border border-amber-300 rounded-xl space-y-2 text-stone-800 font-radio text-xs">
+                          <div className="flex items-center gap-2 text-amber-900 font-bold text-xs">
+                            <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                            <span>AI EXPLANATION UNAVAILABLE</span>
+                          </div>
+                          <p className="text-stone-700 text-xs leading-relaxed">
+                            The AI service could not generate an explanation for this question right now. Please try again.
+                          </p>
+                          <button
+                            onClick={() => fetchAiExplanation(true)}
+                            disabled={isExplaining}
+                            className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-lg text-xs transition-all cursor-pointer shadow-xs flex items-center gap-1.5"
+                          >
+                            <Sparkles className={`w-3.5 h-3.5 ${isExplaining ? 'animate-spin' : ''}`} />
+                            <span>Retry Explanation</span>
+                          </button>
+                        </div>
+                      ) : typeof aiExplanations[currentQId] === 'object' && aiExplanations[currentQId] !== null ? (
+                        <div className="space-y-3 font-radio text-xs text-stone-800">
+                          {/* Verdict & Concept Bar */}
+                          <div className="flex items-center justify-between gap-2 pb-2 border-b border-stone-200">
+                            <span className={`px-2.5 py-1 rounded-md font-bold text-xs ${
+                              aiExplanations[currentQId].correct ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' : 'bg-red-100 text-red-800 border border-red-300'
+                            }`}>
+                              {aiExplanations[currentQId].correct ? 'Verdict: CORRECT ANSWER ✅' : 'Verdict: INCORRECT ANSWER ❌'}
+                            </span>
+                            {aiExplanations[currentQId].concept && (
+                              <span className="px-2 py-0.5 bg-stone-100 border border-stone-300 text-stone-700 rounded text-[10px] font-bold">
+                                {aiExplanations[currentQId].concept}
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Options Breakdown */}
+                          <div className="grid grid-cols-2 gap-2 text-[11px] bg-stone-50 p-2.5 rounded-lg border border-stone-200">
+                            <div>
+                              <span className="text-stone-500 font-semibold block text-[10px]">CORRECT OPTION</span>
+                              <span className="font-bold text-emerald-700">{aiExplanations[currentQId].correctOption || 'B'}</span>
+                            </div>
+                            <div>
+                              <span className="text-stone-500 font-semibold block text-[10px]">YOUR SELECTED OPTION</span>
+                              <span className="font-bold text-stone-800">{selectedOption !== null ? ['A','B','C','D'][selectedOption] : 'None'}</span>
+                            </div>
+                          </div>
+
+                          {/* Why Your Answer Explanation */}
+                          {aiExplanations[currentQId].whyYourAnswer && (
+                            <div className="bg-amber-50/60 border border-amber-200 rounded-lg p-2.5 text-stone-800">
+                              <span className="font-bold text-amber-900 block text-[10px] uppercase mb-0.5">Analysis of Your Answer:</span>
+                              <p className="text-xs leading-relaxed">{aiExplanations[currentQId].whyYourAnswer}</p>
+                            </div>
+                          )}
+
+                          {/* Step-by-Step Breakdown */}
+                          <div>
+                            <span className="font-bold text-stone-700 block text-[10px] uppercase mb-1">Step-by-Step Solution:</span>
+                            {Array.isArray(aiExplanations[currentQId].stepByStepSolution) && aiExplanations[currentQId].stepByStepSolution.length > 0 ? (
+                              <ul className="space-y-1 text-xs text-stone-700 list-disc list-inside">
+                                {aiExplanations[currentQId].stepByStepSolution.map((step, sIdx) => (
+                                  <li key={sIdx}>{step}</li>
+                                ))}
+                              </ul>
+                            ) : (
+                              <p className="whitespace-pre-wrap leading-relaxed text-xs text-stone-700">
+                                {aiExplanations[currentQId].explanation}
+                              </p>
+                            )}
+                          </div>
+
+                          {/* Final Explanation Summary */}
+                          {aiExplanations[currentQId].finalExplanation && (
+                            <div className="bg-stone-50 border border-stone-200 rounded-lg p-2.5 text-stone-800">
+                              <span className="font-bold text-stone-600 block text-[10px] uppercase mb-0.5">Summary:</span>
+                              <p className="text-xs leading-relaxed font-semibold">{aiExplanations[currentQId].finalExplanation}</p>
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <p className="font-radio text-xs text-stone-800 leading-relaxed whitespace-pre-wrap mb-3">
+                          {aiExplanations[currentQId] || currentQ.explanation}
+                        </p>
+                      )}
+                    </div>
                   )}
 
                   {evalFeedback && (

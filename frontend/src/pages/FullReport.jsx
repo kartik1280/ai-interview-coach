@@ -1,13 +1,13 @@
 import React, { useRef, useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { ArrowLeft, Download, Award, AlertTriangle, CheckCircle2, LayoutDashboard, Sliders, Sparkles, Brain, MessageSquare, Zap } from 'lucide-react'
+import { ArrowLeft, Download, Award, CheckCircle2, LayoutDashboard, Sliders, Sparkles, Brain, MessageSquare, Zap, Target, TrendingUp, AlertTriangle } from 'lucide-react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts'
 import html2canvas from 'html2canvas'
 import { jsPDF } from 'jspdf'
 import { supabase } from '../lib/supabase'
 
-// Score tier colors matching app rules
+// Score tier colors
 const getScoreColor = (score) => {
   const num = parseFloat(score)
   if (num >= 8.5) return '#2F8F6E' // Green
@@ -24,19 +24,51 @@ export default function FullReport() {
   const [error, setError] = useState(null)
   const [isExporting, setIsExporting] = useState(false)
 
-  // Onboarding profile
   const [userProfile, setUserProfile] = useState({
-    fullName: 'Loading...',
-    targetPosition: '',
-    industry: ''
+    fullName: 'Candidate',
+    targetPosition: 'Software Engineer',
+    industry: 'Tech'
   })
 
-  // State arrays populated by API
-  const [rounds, setRounds] = useState([])
-  const [history, setHistory] = useState([])
-  const [streak, setStreak] = useState(0)
-  const [overallScore, setOverallScore] = useState(0.0)
-  const [areasToImprove, setAreasToImprove] = useState('')
+  const [analytics, setAnalytics] = useState({
+    overview: {
+      overallReadiness: 0.0,
+      totalCompletedRounds: 0,
+      totalQuestionsAnswered: 0,
+      streak: 0,
+      strongestArea: 'None yet',
+      weakestArea: 'None yet'
+    },
+    technical: {
+      attempts: 0,
+      averageScore: 0.0,
+      bestScore: 0.0,
+      latestScore: 0.0,
+      percentage: 0,
+      trend: 'no_attempts'
+    },
+    behavioral: {
+      attempts: 0,
+      averageScore: 0.0,
+      bestScore: 0.0,
+      latestScore: 0.0,
+      percentage: 0,
+      star: { situation: 0.0, task: 0.0, action: 0.0, result: 0.0 }
+    },
+    aptitude: {
+      attempts: 0,
+      averageScore: 0.0,
+      bestScore: 0.0,
+      latestScore: 0.0,
+      accuracy: 0.0,
+      questionsAnswered: 0,
+      questionsCorrect: 0
+    },
+    recentHistory: [],
+    areasToImproveList: [],
+    aiAnalysisAvailable: false,
+    aiPlan: {}
+  })
 
   useEffect(() => {
     const fetchReportData = async () => {
@@ -59,15 +91,50 @@ export default function FullReport() {
 
         const data = await response.json()
         setUserProfile({
-          fullName: data.fullName,
-          targetPosition: data.targetPosition,
-          industry: data.industry
+          fullName: data.fullName || (data.overview && data.overview.fullName) || 'Candidate',
+          targetPosition: data.targetPosition || (data.overview && data.overview.targetPosition) || 'Software Engineer',
+          industry: data.industry || (data.overview && data.overview.industry) || 'Tech'
         })
-        setRounds(data.rounds)
-        setHistory(data.recentHistory)
-        setStreak(data.streak)
-        setOverallScore(data.overallScore)
-        setAreasToImprove(data.areasToImprove)
+
+        setAnalytics({
+          overview: data.overview || {
+            overallReadiness: data.overallScore || 0.0,
+            totalCompletedRounds: data.roundsDone || 0,
+            totalQuestionsAnswered: (data.overview && data.overview.totalQuestionsAnswered) || 0,
+            streak: data.streak || 0,
+            strongestArea: (data.overview && data.overview.strongestArea) || 'None yet',
+            weakestArea: (data.overview && data.overview.weakestArea) || 'None yet'
+          },
+          technical: data.technical || {
+            attempts: 0,
+            averageScore: 0.0,
+            bestScore: 0.0,
+            latestScore: 0.0,
+            percentage: 0,
+            trend: 'no_attempts'
+          },
+          behavioral: data.behavioral || {
+            attempts: 0,
+            averageScore: 0.0,
+            bestScore: 0.0,
+            latestScore: 0.0,
+            percentage: 0,
+            star: { situation: 0.0, task: 0.0, action: 0.0, result: 0.0 }
+          },
+          aptitude: data.aptitude || {
+            attempts: 0,
+            averageScore: 0.0,
+            bestScore: 0.0,
+            latestScore: 0.0,
+            accuracy: 0.0,
+            questionsAnswered: 0,
+            questionsCorrect: 0
+          },
+          recentHistory: data.recentHistory || [],
+          areasToImproveList: data.areasToImproveList || [],
+          aiAnalysisAvailable: data.aiAnalysisAvailable || false,
+          aiPlan: data.aiPlan || {}
+        })
       } catch (err) {
         console.error('Error fetching report:', err)
         setError(err.message)
@@ -79,34 +146,33 @@ export default function FullReport() {
     fetchReportData()
   }, [])
 
+  // Chart comparison data
+  const chartData = [
+    {
+      name: 'Technical',
+      score: analytics.technical.averageScore,
+      fillColor: getScoreColor(analytics.technical.averageScore)
+    },
+    {
+      name: 'Behavioral',
+      score: analytics.behavioral.averageScore,
+      fillColor: getScoreColor(analytics.behavioral.averageScore)
+    },
+    {
+      name: 'Aptitude',
+      score: roundToOneDecimal((analytics.aptitude.averageScore / 50.0) * 10),
+      fillColor: getScoreColor((analytics.aptitude.averageScore / 50.0) * 10)
+    }
+  ]
 
-  // Filter completed round types for the Recharts comparison chart
-  const completedChartData = rounds.map((r) => ({
-    name: r.name.replace(' round', ''),
-    score: r.score,
-    fillColor: getScoreColor(r.score)
-  }))
-
-  // Derive scorecard from rounds data for the evaluation breakdown section
-  const techRound = rounds.find(r => r.id === 'technical')
-  const behRound = rounds.find(r => r.id === 'behavioral')
-  const aptRound = rounds.find(r => r.id === 'aptitude')
-  const scorecard = {
-    technical_accuracy: techRound
-      ? { score: techRound.score, feedback: techRound.feedback?.join('. ') || 'No feedback yet.' }
-      : { score: 0, feedback: 'No technical round completed yet.' },
-    sentence_formation: behRound
-      ? { score: behRound.score, feedback: behRound.feedback?.join('. ') || 'No feedback yet.' }
-      : { score: 0, feedback: 'No behavioral round completed yet.' },
-    communication_confidence: aptRound
-      ? { score: aptRound.score, feedback: aptRound.feedback?.join('. ') || 'No feedback yet.' }
-      : { score: 0, feedback: 'No aptitude round completed yet.' },
-    suggested_improvement: areasToImprove || null
+  function roundToOneDecimal(num) {
+    return Math.round(num * 10) / 10
   }
 
+  const overallScore = analytics.overview.overallReadiness.toFixed(1)
   const overallColor = getScoreColor(overallScore)
 
-  // Export to PDF Handler
+  // Export to PDF
   const handleDownloadPDF = async () => {
     if (!reportRef.current) return
     setIsExporting(true)
@@ -149,7 +215,10 @@ export default function FullReport() {
   if (isLoading) {
     return (
       <div className="min-h-screen bg-[#FCF5E2] flex items-center justify-center font-radio">
-        <div className="text-stone-600 font-bold">Loading your report...</div>
+        <div className="text-stone-600 font-bold flex items-center gap-2">
+          <Sparkles className="w-5 h-5 text-amber-500 animate-spin" />
+          <span>Generating full report...</span>
+        </div>
       </div>
     )
   }
@@ -182,10 +251,10 @@ export default function FullReport() {
         </div>
       </header>
 
-      {/* Main Report Container */}
+      {/* Main Container */}
       <main className="pt-28 pb-20 px-4 sm:px-6">
-        <div className="max-w-2xl mx-auto flex flex-col gap-4">
-          {/* Action Header Bar: Back to dashboard + Download PDF Button */}
+        <div className="max-w-3xl mx-auto flex flex-col gap-4">
+          {/* Action Header Bar: Back + Download PDF */}
           <div className="flex items-center justify-between bg-white border-2 border-black rounded-2xl px-6 py-3 shadow-[4px_4px_0px_0px_#000000]">
             <button
               onClick={() => navigate('/dashboard')}
@@ -214,7 +283,7 @@ export default function FullReport() {
             </button>
           </div>
 
-          {/* Report Printable Document Card */}
+          {/* Printable Report Document Card */}
           <motion.div
             ref={reportRef}
             initial={{ opacity: 0, y: 20 }}
@@ -222,47 +291,62 @@ export default function FullReport() {
             transition={{ duration: 0.4 }}
             className="bg-white border-2 border-black rounded-3xl p-6 sm:p-10 shadow-[6px_6px_0px_0px_#000000]"
           >
-            {/* Report Title Header */}
+            {/* Title Header */}
             <div className="text-center mb-8 pb-6 border-b-2 border-black">
               <span className="font-fragment text-[11px] font-semibold uppercase tracking-widest text-stone-400">
-                AI SCORECARD AUDIT REPORT
+                OFFICIAL PRACTICE AUDIT & READINESS REPORT
               </span>
               <h1 className="font-serif font-bold text-3xl sm:text-4xl text-[#1A1A1A] tracking-tight mt-1 mb-1">
-                Voice Screening Report
+                Candidate Assessment Report
               </h1>
               <p className="font-radio text-stone-600 text-sm font-semibold">
-                Candidate: <span className="text-black font-bold">{userProfile.fullName}</span> · Target Role: <span className="text-black font-bold">{userProfile.targetPosition}</span>
+                Candidate: <span className="text-black font-bold">{userProfile.fullName}</span> · Role: <span className="text-black font-bold">{userProfile.targetPosition}</span> · Industry: <span className="text-stone-700">{userProfile.industry}</span>
               </p>
             </div>
 
-            {/* 1. OVERALL READINESS SCORE */}
+            {/* 1. EXECUTIVE READINESS SUMMARY */}
             <section className="mb-10 text-center bg-stone-50/70 rounded-2xl border-2 border-black p-6 shadow-xs">
               <span className="font-fragment text-xs font-bold text-stone-500 uppercase tracking-widest block mb-1">
-                OVERALL READINESS SCORE
+                OVERALL INTERVIEW READINESS SCORE
               </span>
               <div className="font-radio font-extrabold text-5xl sm:text-6xl" style={{ color: overallColor }}>
                 {overallScore}<span className="text-stone-400 font-medium text-2xl">/10</span>
               </div>
-              <p className="font-radio text-xs text-stone-600 mt-2 max-w-sm mx-auto">
-                Evaluated from 5-minute real-time voice interview using Groq Llama-3.3-70b structured intelligence.
+              <p className="font-radio text-xs text-stone-600 mt-2 max-w-md mx-auto">
+                Aggregated across {analytics.overview.totalCompletedRounds} completed assessments ({analytics.technical.attempts} Technical, {analytics.behavioral.attempts} Behavioral, {analytics.aptitude.attempts} Aptitude).
               </p>
+
+              <div className="grid grid-cols-3 gap-3 mt-5 pt-4 border-t border-stone-200 text-left font-radio">
+                <div className="p-2.5 bg-white rounded-xl border border-stone-200">
+                  <span className="text-[10px] text-stone-400 font-bold uppercase block">Total Rounds</span>
+                  <span className="font-extrabold text-base text-black">{analytics.overview.totalCompletedRounds} Completed</span>
+                </div>
+                <div className="p-2.5 bg-white rounded-xl border border-stone-200">
+                  <span className="text-[10px] text-stone-400 font-bold uppercase block">Strongest Area</span>
+                  <span className="font-extrabold text-xs text-emerald-700">{analytics.overview.strongestArea}</span>
+                </div>
+                <div className="p-2.5 bg-white rounded-xl border border-stone-200">
+                  <span className="text-[10px] text-stone-400 font-bold uppercase block">Focus Priority</span>
+                  <span className="font-extrabold text-xs text-amber-700">{analytics.overview.weakestArea}</span>
+                </div>
+              </div>
             </section>
 
-            {/* 2. RECHARTS SCORES COMPARISON CHART */}
+            {/* 2. RECHARTS SCORES COMPARISON */}
             <section className="mb-10 text-left">
               <div className="pb-2 mb-4 border-b border-[#1A1A1A] flex items-center justify-between">
                 <h2 className="font-radio font-extrabold text-xs text-[#1A1A1A] uppercase tracking-widest">
-                  CATEGORY PERFORMANCE COMPARISON
+                  BENCHMARK PERFORMANCE COMPARISON
                 </h2>
                 <span className="font-radio text-[11px] text-stone-400">
-                  3 Core Assessment Criteria
+                  Normalized 10-point scale
                 </span>
               </div>
 
               <div className="bg-white border-2 border-black rounded-2xl p-4 sm:p-6 shadow-xs">
-                <div className="h-56 w-full">
+                <div className="h-52 w-full">
                   <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={completedChartData} margin={{ top: 15, right: 10, left: -20, bottom: 0 }}>
+                    <BarChart data={chartData} margin={{ top: 15, right: 10, left: -20, bottom: 0 }}>
                       <XAxis
                         dataKey="name"
                         tick={{ fill: '#1A1A1A', fontSize: 12, fontWeight: 700 }}
@@ -275,7 +359,7 @@ export default function FullReport() {
                         axisLine={{ stroke: '#1A1A1A', strokeWidth: 2 }}
                       />
                       <Tooltip
-                        formatter={(val) => [`${val} / 10`, 'Score']}
+                        formatter={(val) => [`${val} / 10`, 'Average Score']}
                         contentStyle={{
                           backgroundColor: '#FFFFFF',
                           border: '2px solid #000000',
@@ -284,8 +368,8 @@ export default function FullReport() {
                           fontSize: '12px'
                         }}
                       />
-                      <Bar dataKey="score" radius={[6, 6, 0, 0]} barSize={44}>
-                        {completedChartData.map((entry, index) => (
+                      <Bar dataKey="score" radius={[6, 6, 0, 0]} barSize={48}>
+                        {chartData.map((entry, index) => (
                           <Cell key={`cell-${index}`} fill={entry.fillColor} />
                         ))}
                       </Bar>
@@ -295,87 +379,163 @@ export default function FullReport() {
               </div>
             </section>
 
-            {/* 3. CATEGORY SCORECARDS & FEEDBACK */}
+            {/* 3. MULTI-ROUND DEEP-DIVE SECTIONS */}
             <section className="mb-10 text-left">
               <div className="pb-2 mb-4 border-b border-[#1A1A1A]">
                 <h2 className="font-radio font-extrabold text-xs text-[#1A1A1A] uppercase tracking-widest">
-                  DETAILED EVALUATION BREAKDOWN
+                  CATEGORY DEEP-DIVE REPORTS
                 </h2>
               </div>
 
               <div className="flex flex-col gap-4 font-radio">
-                {/* Technical Accuracy */}
+                {/* 3.1 TECHNICAL DEEP-DIVE */}
                 <div className="p-5 rounded-2xl border-2 border-black bg-stone-50/50 shadow-xs">
                   <div className="flex items-center justify-between mb-2">
                     <span className="font-radio font-extrabold text-xs text-black uppercase tracking-wider flex items-center gap-2">
                       <Brain className="w-4 h-4 text-emerald-700" />
-                      TECHNICAL ACCURACY
+                      TECHNICAL CODING & ALGORITHMS
                     </span>
                     <span className="font-radio font-extrabold text-base text-emerald-700">
-                      {scorecard.technical_accuracy?.score || 8.5} / 10
+                      {analytics.technical.averageScore} / 10
                     </span>
                   </div>
+                  <div className="grid grid-cols-4 gap-2 mb-3 text-center bg-white p-2 rounded-xl border border-stone-200">
+                    <div>
+                      <span className="text-[10px] text-stone-500 font-bold block">Attempts</span>
+                      <span className="font-extrabold text-xs text-black">{analytics.technical.attempts}</span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-stone-500 font-bold block">Average</span>
+                      <span className="font-extrabold text-xs text-black">{analytics.technical.averageScore}</span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-stone-500 font-bold block">Best</span>
+                      <span className="font-extrabold text-xs text-emerald-700">{analytics.technical.bestScore}</span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-stone-500 font-bold block">Latest</span>
+                      <span className="font-extrabold text-xs text-black">{analytics.technical.latestScore}</span>
+                    </div>
+                  </div>
                   <p className="text-xs text-stone-700 leading-relaxed">
-                    {scorecard.technical_accuracy?.feedback}
+                    Evaluates candidate runtime complexity, edge case handling, and programming precision. Solutions are graded using Google Gemini structured evaluation.
                   </p>
                 </div>
 
-                {/* Sentence Formation */}
+                {/* 3.2 BEHAVIORAL DEEP-DIVE */}
                 <div className="p-5 rounded-2xl border-2 border-black bg-stone-50/50 shadow-xs">
                   <div className="flex items-center justify-between mb-2">
                     <span className="font-radio font-extrabold text-xs text-black uppercase tracking-wider flex items-center gap-2">
                       <MessageSquare className="w-4 h-4 text-blue-700" />
-                      SENTENCE FORMATION & ARTICULATION
+                      BEHAVIORAL (STAR METHODOLOGY)
                     </span>
                     <span className="font-radio font-extrabold text-base text-blue-700">
-                      {scorecard.sentence_formation?.score || 8.0} / 10
+                      {analytics.behavioral.averageScore} / 10
                     </span>
                   </div>
+                  <div className="grid grid-cols-4 gap-2 mb-3 text-center bg-white p-2 rounded-xl border border-stone-200">
+                    <div>
+                      <span className="text-[10px] text-stone-500 font-bold block">Situation</span>
+                      <span className="font-extrabold text-xs text-black">{analytics.behavioral.star.situation}</span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-stone-500 font-bold block">Task</span>
+                      <span className="font-extrabold text-xs text-black">{analytics.behavioral.star.task}</span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-stone-500 font-bold block">Action</span>
+                      <span className="font-extrabold text-xs text-black">{analytics.behavioral.star.action}</span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-stone-500 font-bold block">Result</span>
+                      <span className="font-extrabold text-xs text-black">{analytics.behavioral.star.result}</span>
+                    </div>
+                  </div>
                   <p className="text-xs text-stone-700 leading-relaxed">
-                    {scorecard.sentence_formation?.feedback}
+                    Measures articulation clarity and structured responses across Situation, Task, Action, and quantifiable Results.
                   </p>
                 </div>
 
-                {/* Communication Confidence */}
+                {/* 3.3 APTITUDE DEEP-DIVE */}
                 <div className="p-5 rounded-2xl border-2 border-black bg-stone-50/50 shadow-xs">
                   <div className="flex items-center justify-between mb-2">
                     <span className="font-radio font-extrabold text-xs text-black uppercase tracking-wider flex items-center gap-2">
                       <Zap className="w-4 h-4 text-amber-700" />
-                      COMMUNICATION CONFIDENCE
+                      APTITUDE & QUANTITATIVE REASONING
                     </span>
                     <span className="font-radio font-extrabold text-base text-amber-700">
-                      {scorecard.communication_confidence?.score || 8.7} / 10
+                      {analytics.aptitude.averageScore} / 50
                     </span>
                   </div>
+                  <div className="grid grid-cols-4 gap-2 mb-3 text-center bg-white p-2 rounded-xl border border-stone-200">
+                    <div>
+                      <span className="text-[10px] text-stone-500 font-bold block">Attempts</span>
+                      <span className="font-extrabold text-xs text-black">{analytics.aptitude.attempts}</span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-stone-500 font-bold block">Avg Score</span>
+                      <span className="font-extrabold text-xs text-black">{analytics.aptitude.averageScore} / 50</span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-stone-500 font-bold block">Best Score</span>
+                      <span className="font-extrabold text-xs text-amber-800">{analytics.aptitude.bestScore} / 50</span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-stone-500 font-bold block">Accuracy</span>
+                      <span className="font-extrabold text-xs text-black">{analytics.aptitude.accuracy}%</span>
+                    </div>
+                  </div>
                   <p className="text-xs text-stone-700 leading-relaxed">
-                    {scorecard.communication_confidence?.feedback}
+                    Evaluates numerical aptitude, logical reasoning, and time management across timed question sets.
                   </p>
                 </div>
               </div>
             </section>
 
-            {/* 4. KEY ACTIONABLE IMPROVEMENTS */}
-            {scorecard.suggested_improvement && (
-              <section className="text-left">
-                <div className="pb-2 mb-4 border-b border-[#1A1A1A]">
-                  <h2 className="font-radio font-extrabold text-xs text-[#1A1A1A] uppercase tracking-widest">
-                    RECOMMENDED ACTION ITEM
-                  </h2>
-                </div>
+            {/* 4. AI ACTIONABLE IMPROVEMENT PLAN */}
+            <section className="text-left">
+              <div className="pb-2 mb-4 border-b border-[#1A1A1A] flex items-center justify-between">
+                <h2 className="font-radio font-extrabold text-xs text-[#1A1A1A] uppercase tracking-widest flex items-center gap-1.5">
+                  <Target className="w-4 h-4 text-black" />
+                  <span>ACTIONABLE IMPROVEMENT PLAN</span>
+                </h2>
+                <span className="font-radio text-[10px] font-bold px-2 py-0.5 rounded bg-stone-100 text-stone-600">
+                  {analytics.aiAnalysisAvailable ? 'AI Synthesis (Gemini)' : 'Deterministic Analytics'}
+                </span>
+              </div>
 
-                <div className="p-5 rounded-2xl border-2 border-black bg-amber-50/60 shadow-xs flex items-start gap-3">
-                  <Award className="w-5 h-5 text-amber-700 shrink-0 mt-0.5" />
-                  <div>
-                    <h3 className="font-serif font-bold text-sm text-black mb-1">
-                      Key Area for Growth
-                    </h3>
-                    <p className="font-radio text-xs text-stone-800 leading-relaxed">
-                      {scorecard.suggested_improvement}
-                    </p>
-                  </div>
+              {analytics.areasToImproveList && analytics.areasToImproveList.length > 0 ? (
+                <div className="flex flex-col gap-3">
+                  {analytics.areasToImproveList.map((item, idx) => (
+                    <div key={idx} className="p-5 rounded-2xl border-2 border-black bg-amber-50/60 shadow-xs flex items-start gap-3">
+                      <Award className="w-5 h-5 text-amber-700 shrink-0 mt-0.5" />
+                      <div className="w-full">
+                        <div className="flex items-center justify-between mb-1">
+                          <h3 className="font-serif font-bold text-sm text-black">
+                            {idx + 1}. {item.area}
+                          </h3>
+                          <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded ${
+                            item.severity === 'high' ? 'bg-red-100 text-red-800' : 'bg-amber-100 text-amber-800'
+                          }`}>
+                            {item.severity} severity
+                          </span>
+                        </div>
+                        <p className="font-radio text-xs text-stone-600 mb-1">
+                          <strong>Observed Pattern:</strong> {item.evidence}
+                        </p>
+                        <p className="font-radio text-xs text-stone-800 font-semibold leading-relaxed">
+                          <strong>Action Item:</strong> {item.recommendation}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              </section>
-            )}
+              ) : (
+                <div className="p-5 rounded-2xl border-2 border-black bg-stone-50/60 shadow-xs text-center">
+                  <p className="text-xs text-stone-600">No improvement plan available. Complete practice rounds to view targeted guidance.</p>
+                </div>
+              )}
+            </section>
           </motion.div>
         </div>
       </main>

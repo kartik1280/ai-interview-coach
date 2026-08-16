@@ -1,14 +1,47 @@
-from pydantic_settings import BaseSettings
+import os
 from typing import Optional
 
+from dotenv import load_dotenv
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+load_dotenv()
+
+
 class Settings(BaseSettings):
-    supabase_url: str = "https://fiyyiepsdiutloqvonpz.supabase.co"
-    supabase_service_role_key: str = "sb_publishable__8wmK3kcAvAo3foaI-6fDQ_nCvNdViE"
-    openai_api_key: Optional[str] = None
-    
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        extra = "ignore"
+    model_config = SettingsConfigDict(extra="ignore")
+
+    # Supabase
+    supabase_url: str = os.getenv(
+        "SUPABASE_URL",
+        "https://fiyyiepsdiutloqvonpz.supabase.co",
+    )
+    supabase_service_role_key: str = os.getenv(
+        "SUPABASE_SERVICE_ROLE_KEY",
+        "",
+    )
+
+    # AI Providers
+    gemini_api_key: Optional[str] = os.getenv(
+        "GEMINI_API_KEY",
+        None,
+    )
+    groq_api_key: Optional[str] = os.getenv(
+        "GROQ_API_KEY",
+        None,
+    )
+
+    # Voice Provider
+    elevenlabs_api_key: Optional[str] = os.getenv(
+        "ELEVENLABS_API_KEY",
+        None,
+    )
+    elevenlabs_voice_id: Optional[str] = os.getenv(
+        "ELEVENLABS_VOICE_ID",
+        None,
+    )
+
+    # Server
+    port: int = int(os.getenv("PORT", 3000))
+
 
 settings = Settings()

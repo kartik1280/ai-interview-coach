@@ -282,13 +282,15 @@ def submit_answer(
             }).eq("id", id).execute()
             
         star_breakdown = grade.get("star_breakdown")
+        analysis_details = grade.get("analysisDetails")
         
         return AnswerSubmitResponse(
             score=score,
             feedback=feedback,
             isCompleted=is_completed,
             overallScore=overall_score,
-            starBreakdown=star_breakdown
+            starBreakdown=star_breakdown,
+            analysisDetails=analysis_details
         )
         
     except HTTPException:
@@ -296,13 +298,107 @@ def submit_answer(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to submit answer: {str(e)}")
 
+@router.post("/{id}/question/{question_id}/explanation")
+def get_question_explanation(
+    id: str,
+    question_id: str,
+    payload: AptitudeExplainRequest,
+    user = Depends(get_user),
+    client: Client = Depends(get_admin_client)
+):
+    try:
+        # 1. Verify round exists and belongs to authenticated user
+        round_res = client.table("rounds").select("*").eq("id", id).eq("user_id", user.id).execute()
+        if not round_res.data or len(round_res.data) == 0:
+            raise HTTPException(status_code=404, detail="Round not found or access denied")
+
+        # 2. Verify question belongs to this round
+        q_res = client.table("questions").select("*").eq("id", question_id).eq("round_id", id).execute()
+        if not q_res.data or len(q_res.data) == 0:
+            raise HTTPException(status_code=404, detail="Question not found in this round")
+
+        q_record = q_res.data[0]
+        q_text = q_record.get("question_text", "")
+
+        # Extract options from payload or question text
+        options = payload.options
+        if not options and " Options: " in q_text:
+            parts = q_text.split(" Options: ")
+            if len(parts) > 1 and " | " in parts[1]:
+                options = parts[1].split(" | ")
+
+        # Fetch selected option from payload or previous answer record
+        selected_option = payload.selectedOption
+        if not selected_option:
+            ans_res = client.table("answers").select("answer_text").eq("question_id", question_id).execute()
+            if ans_res.data and len(ans_res.data) > 0:
+                selected_option = ans_res.data[0].get("answer_text")
+
+        explanation_data = generate_aptitude_explanation(
+            question=q_text,
+            options=options,
+            selected_option=selected_option,
+            question_id=question_id
+        )
+
+        if isinstance(explanation_data, dict):
+            if explanation_data.get("aiEvaluationAvailable") == False:
+                return {
+                    "aiEvaluationAvailable": False,
+                    "error": explanation_data.get("error", "AI explanation is currently unavailable. Please try again."),
+                    "explanation": "AI explanation is currently unavailable. Please try again."
+                }
+            return {
+                "aiEvaluationAvailable": True,
+                "explanation": explanation_data.get("explanation") or explanation_data.get("rawText"),
+                "correct": explanation_data.get("correct"),
+                "verdict": explanation_data.get("verdict") or ("Verdict: CORRECT ANSWER ✅" if explanation_data.get("correct") else "Verdict: INCORRECT ANSWER ❌"),
+                "correctOption": explanation_data.get("correctOption"),
+                "selectedOption": selected_option or explanation_data.get("selectedOption"),
+                "correctAnswer": explanation_data.get("correctAnswer"),
+                "selectedAnswer": explanation_data.get("selectedAnswer"),
+                "concept": explanation_data.get("concept"),
+                "whyYourAnswer": explanation_data.get("whyYourAnswer"),
+                "stepByStepSolution": explanation_data.get("stepByStepSolution") or [],
+                "finalExplanation": explanation_data.get("finalExplanation"),
+                "details": explanation_data
+            }
+
+        return {"explanation": str(explanation_data)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to generate question explanation: {str(e)}")
+
 @router.post("/explain-aptitude")
 def explain_aptitude(
     payload: AptitudeExplainRequest,
     user = Depends(get_user)
 ):
     try:
-        explanation = generate_aptitude_explanation(payload.questionText, payload.options, payload.selectedOption)
-        return {"explanation": explanation}
+        explanation_data = generate_aptitude_explanation(payload.questionText, payload.options, payload.selectedOption, payload.questionId)
+        if isinstance(explanation_data, dict):
+            if explanation_data.get("aiEvaluationAvailable") == False:
+                return {
+                    "aiEvaluationAvailable": False,
+                    "error": explanation_data.get("error", "AI explanation is currently unavailable. Please try again."),
+                    "explanation": "AI explanation is currently unavailable. Please try again."
+                }
+            return {
+                "aiEvaluationAvailable": True,
+                "explanation": explanation_data.get("explanation") or explanation_data.get("rawText"),
+                "correct": explanation_data.get("correct"),
+                "verdict": explanation_data.get("verdict") or ("Verdict: CORRECT ANSWER ✅" if explanation_data.get("correct") else "Verdict: INCORRECT ANSWER ❌"),
+                "correctOption": explanation_data.get("correctOption"),
+                "selectedOption": payload.selectedOption or explanation_data.get("selectedOption"),
+                "correctAnswer": explanation_data.get("correctAnswer"),
+                "selectedAnswer": explanation_data.get("selectedAnswer"),
+                "concept": explanation_data.get("concept"),
+                "whyYourAnswer": explanation_data.get("whyYourAnswer"),
+                "stepByStepSolution": explanation_data.get("stepByStepSolution") or [],
+                "finalExplanation": explanation_data.get("finalExplanation"),
+                "details": explanation_data
+            }
+        return {"explanation": str(explanation_data)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to generate AI explanation: {str(e)}")
