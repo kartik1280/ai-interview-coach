@@ -5,6 +5,7 @@ pydantic-settings
 supabase
 python-multipart
 pymupdf
+google-genai
 openai
 python-jose[cryptography]
 httpx
