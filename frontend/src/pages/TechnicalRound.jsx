@@ -716,7 +716,7 @@ export default function TechnicalRound() {
     handleSelectProblem(finalProblemsList[nextIdx], nextIdx)
   }
 
-  // Unlock Solution to allow edits
+// Unlock Solution to allow edits
   const handleUnlockSolution = () => {
     setLockedSolutions(prev => ({ ...prev, [currentQId]: false }))
     setShowExplanation(false)
@@ -724,30 +724,145 @@ export default function TechnicalRound() {
   }
 
   // Final Assessment Submission
-  const handleSubmitAssessmentAll = async () => {
+  const [roundSummary, setRoundSummary] = useState(null)
+
+  const handleSubmitAssessmentAll = async (isTimeout = false) => {
     if (isSubmitting) return
+
+    const answeredProblems = finalProblemsList.filter(p => {
+      const qId = p.questionId || p.id
+      const pCode = codePerProblem[qId]
+      return lockedSolutions[qId] || (pCode && pCode.trim().length > 0)
+    })
+
+    if (!isTimeout && answeredProblems.length === 0) {
+      alert("Please solve at least one problem before submitting.")
+      return
+    }
+
     setIsSubmitting(true)
     setIsTimerActive(false)
 
+    let summaryData = null
+
     try {
-      const { data: { session } } = await supabase.auth.getSession()
-      if (session && roundId) {
-        await fetch(`${import.meta.env.VITE_API_BASE_URL}/round/${roundId}/finish`, {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${session.access_token}`
-          }
-        })
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession()
+      if (sessionError || !session) {
+        throw new Error('No active user session. Please log in.')
       }
+
+      if (roundId) {
+        // Auto-lock/submit any answered problems that haven't been posted yet
+        const unpostedQIds = answeredProblems
+          .map(p => p.questionId || p.id)
+          .filter(qId => !lockedSolutions[qId])
+
+        if (unpostedQIds.length > 0) {
+          const submitPromises = unpostedQIds.map(async (qId) => {
+            const prob = finalProblemsList.find(p => (p.questionId || p.id) === qId)
+            const cCode = codePerProblem[qId] || (prob ? prob.starterCodes[language] : '')
+            try {
+              return fetch(`${import.meta.env.VITE_API_BASE_URL}/round/${roundId}/answer?question_id=${qId}`, {
+                method: 'POST',
+                headers: {
+                  'Authorization': `Bearer ${session.access_token}`,
+                  'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                  answerText: cCode,
+                  language: language
+                })
+              })
+            } catch (pErr) {
+              console.warn('Failed auto-posting answer for qId:', qId, pErr)
+            }
+          })
+          await Promise.all(submitPromises)
+        }
+
+        try {
+          const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/round/${roundId}/finish`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${session.access_token}`
+            }
+          })
+          if (response.ok) {
+            summaryData = await response.json()
+          }
+        } catch (fErr) {
+          console.warn('Failed calling finish endpoint:', fErr)
+        }
+      }
+
+      if (!summaryData || summaryData.questionsAttempted === undefined) {
+        const totalCount = finalProblemsList.length
+        const completedCount = answeredProblems.length
+        const unattemptedCount = Math.max(0, totalCount - completedCount)
+        const correctCount = Object.values(evalScores).filter(s => typeof s === 'number' && s >= 7.0).length
+        const wrongCount = Math.max(0, completedCount - correctCount)
+        const validScores = Object.values(evalScores).filter(s => typeof s === 'number' && !isNaN(s))
+        const avgScore = completedCount > 0 && validScores.length > 0
+          ? validScores.reduce((a, b) => a + b, 0) / completedCount
+          : 0.0
+        const accuracy = completedCount > 0 ? Math.round((correctCount / completedCount) * 100) : 0
+
+        summaryData = {
+          status: 'completed',
+          totalQuestions: totalCount,
+          questionsAttempted: completedCount,
+          correctAnswers: correctCount,
+          wrongAnswers: wrongCount,
+          unattempted: unattemptedCount,
+          accuracyPercentage: accuracy,
+          overallScore: Number(avgScore.toFixed(1)),
+          score: Number(avgScore.toFixed(1)),
+          maxScore: 10
+        }
+      }
+
+      setRoundSummary(summaryData)
+      setShowCompletionModal(true)
     } catch (err) {
-      console.warn('Error finalizing round:', err)
+      console.error('Error submitting technical assessment:', err)
+      if (!isTimeout) alert(`Submission failed: ${err.message}`)
     } finally {
       setIsSubmitting(false)
-      setShowCompletionModal(true)
     }
   }
 
-  const completedCount = Object.keys(lockedSolutions).filter(k => lockedSolutions[k]).length
+  const completedCount = roundSummary?.questionsAttempted !== undefined
+    ? roundSummary.questionsAttempted
+    : Object.keys(lockedSolutions).filter(k => lockedSolutions[k]).length
+
+  const totalCount = roundSummary?.totalQuestions !== undefined
+    ? roundSummary.totalQuestions
+    : finalProblemsList.length
+
+  const correctCount = roundSummary?.correctAnswers !== undefined
+    ? roundSummary.correctAnswers
+    : Object.values(evalScores).filter(s => typeof s === 'number' && s >= 7.0).length
+
+  const wrongCount = roundSummary?.wrongAnswers !== undefined
+    ? roundSummary.wrongAnswers
+    : Math.max(0, completedCount - correctCount)
+
+  const unattemptedCount = roundSummary?.unattempted !== undefined
+    ? roundSummary.unattempted
+    : Math.max(0, totalCount - completedCount)
+
+  const validScores = Object.values(evalScores).filter(s => typeof s === 'number' && !isNaN(s))
+  const rawAvg = completedCount > 0 && validScores.length > 0
+    ? validScores.reduce((a, b) => a + b, 0) / Math.max(1, completedCount)
+    : 0.0
+
+  const scoreVal = roundSummary?.overallScore ?? roundSummary?.score ?? rawAvg
+  const finalNum = typeof scoreVal === 'number' && !isNaN(scoreVal) ? scoreVal : (parseFloat(scoreVal) || 0.0)
+  const finalAvgScore = finalNum.toFixed(1)
+
+  const finalAccuracy = roundSummary?.accuracyPercentage !== undefined
+    ? roundSummary.accuracyPercentage
+    : (completedCount > 0 ? Math.round((correctCount / completedCount) * 100) : 0)
 
   return (
     <div className="min-h-screen bg-[#FAF7ED] text-black font-radio selection:bg-parker-red selection:text-white flex flex-col">
@@ -859,122 +974,103 @@ export default function TechnicalRound() {
               className="p-1.5 rounded-xl bg-white border border-stone-300 hover:bg-stone-100 text-stone-700 transition-all cursor-pointer shadow-2xs"
               title="Toggle Editor Theme"
             >
-              {editorTheme === 'vs-dark' ? <Sun className="w-4 h-4 text-amber-500" /> : <Moon className="w-4 h-4 text-stone-700" />}
+              {editorTheme === 'vs-dark' ? <Sun className="w-4 h-4 text-amber-500" /> : <Moon className="w-4 h-4 text-stone-600" />}
             </button>
 
-            {/* Language Select Dropdown */}
-            <select
-              value={language}
-              onChange={handleLanguageChange}
-              disabled={isCurrentLocked}
-              className={`border border-stone-300 rounded-xl px-3 py-1.5 text-xs font-bold text-black shadow-2xs focus:outline-none ${
-                isCurrentLocked ? 'bg-stone-100 cursor-not-allowed' : 'bg-white cursor-pointer'
-              }`}
-            >
-              <option value="javascript">JavaScript (ES6)</option>
-              <option value="python">Python 3</option>
-              <option value="java">Java 17</option>
-              <option value="cpp">C++ 20</option>
-            </select>
+            {/* Language Selector */}
+            <div className="flex items-center gap-1.5 bg-stone-100 border border-stone-300 rounded-xl px-2.5 py-1">
+              <Code2 className="w-3.5 h-3.5 text-stone-500" />
+              <select
+                value={language}
+                onChange={(e) => handleLanguageChange(e)}
+                className="bg-transparent text-xs font-mono font-bold text-black focus:outline-none cursor-pointer"
+              >
+                <option value="javascript">JavaScript (ES6)</option>
+                <option value="python">Python 3</option>
+                <option value="java">Java 17</option>
+                <option value="cpp">C++ 20</option>
+              </select>
+            </div>
 
-            {/* Run Button */}
+            {/* Green Run Code Sandbox Execution Button */}
             <button
               onClick={handleRunCode}
               disabled={isRunning}
-              className="bg-[#8DAA87] hover:bg-[#7A9974] active:scale-95 text-white font-bold text-xs px-4 py-1.5 rounded-xl transition-all cursor-pointer shadow-2xs flex items-center gap-1.5"
+              className="bg-[#2F8F6E] hover:bg-[#26775C] active:scale-95 text-white font-radio font-bold text-xs px-4 py-2 rounded-xl transition-all cursor-pointer shadow-2xs flex items-center gap-1.5 disabled:opacity-50"
             >
-              <Play className="w-3.5 h-3.5 fill-white" />
+              <Play className="w-3.5 h-3.5 fill-current" />
               <span>{isRunning ? 'Running...' : 'Run Code'}</span>
             </button>
           </div>
         </div>
 
-        {/* Explanation Alert Banner if attempted before locking */}
-        <AnimatePresence>
-          {explanationAlert && (
-            <motion.div
-              initial={{ opacity: 0, y: -10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-              className="p-3 bg-amber-50 border-2 border-amber-400 rounded-xl text-xs font-bold text-amber-900 flex items-center justify-between"
-            >
-              <div className="flex items-center gap-2">
-                <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
-                <span>{explanationAlert}</span>
-              </div>
-              <button onClick={() => setExplanationAlert(null)} className="text-amber-800 hover:text-black">
-                ✕
-              </button>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* Editor & Output 2-Column Workspace Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 flex-1 min-h-[520px]">
-          {/* Left Column: Problem Description & Monaco Editor (7 Cols) */}
-          <div className="lg:col-span-7 bg-[#FFFDF8] border border-stone-300 rounded-2xl p-4 flex flex-col gap-4 shadow-2xs text-left">
-            {/* Problem Details Box */}
-            <div className="bg-[#FAF4E5] border border-amber-200/80 rounded-xl p-3.5 text-left relative">
-              <div className="flex items-center justify-between mb-1">
-                <span className="font-fragment text-[10px] font-bold text-stone-500 uppercase tracking-widest flex items-center gap-1.5">
-                  PROBLEM STATEMENT
-                  {isSpeaking && <span className="text-amber-600 font-bold animate-pulse">· 🔊 AI Speaking</span>}
-                </span>
-                <span className="font-mono text-[10px] font-bold text-stone-500">
-                  Target: {Math.floor(selectedProblem.recommendedTimeSeconds / 60)} Mins
-                </span>
-              </div>
-              <p className="text-xs text-stone-700 leading-relaxed mb-2">
+        {/* 2-Column Split: Monaco Code Workspace (Left) & Live Console/AI Breakdown (Right) */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 flex-1 items-start">
+          {/* Left Column: Problem Brief + Monaco Code Editor (7 Cols) */}
+          <div className="lg:col-span-7 flex flex-col gap-3">
+            {/* Collapsible Problem Description & Input/Output Specs */}
+            <div className="bg-[#FAF4E5] border border-stone-300 rounded-2xl p-4 text-left shadow-2xs">
+              <span className="font-fragment text-[10px] font-bold text-stone-500 uppercase tracking-widest block mb-1">
+                PROBLEM STATEMENT
+              </span>
+              <p className="text-xs font-radio text-stone-800 leading-relaxed font-medium mb-2.5">
                 {selectedProblem.description}
               </p>
-              <p className="text-xs font-fragment text-stone-600 bg-white/80 p-2 rounded border border-stone-200 font-mono">
-                {selectedProblem.example}
-              </p>
+              <div className="bg-white/80 border border-stone-200 rounded-xl p-2.5 font-mono text-[11px] text-stone-700 overflow-x-auto">
+                <span className="text-stone-400 font-bold block text-[9px] uppercase mb-0.5">EXAMPLE</span>
+                <code>{selectedProblem.example}</code>
+              </div>
             </div>
 
-            {/* VS Code Monaco Editor */}
-            <div className="flex-1 border-2 border-black rounded-xl overflow-hidden shadow-2xs min-h-[360px] relative">
+            {/* Monaco Editor Container */}
+            <div className="relative border-2 border-black rounded-2xl overflow-hidden shadow-2xs bg-[#1e1e1e]">
+              {/* Lock Status Overlay Banner */}
               {isCurrentLocked && (
-                <div className="absolute top-2 right-2 z-10 bg-emerald-100 border border-emerald-400 text-emerald-900 px-3 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-xs">
-                  <Lock className="w-3 h-3 text-emerald-600" />
+                <div className="absolute top-3 right-3 z-20 bg-emerald-500/90 text-white font-radio font-bold text-[11px] px-3 py-1 rounded-full shadow-xs backdrop-blur-xs flex items-center gap-1">
+                  <Lock className="w-3 h-3" />
                   <span>Solution Locked</span>
                 </div>
               )}
-              <Editor
-                height="100%"
-                language={language}
-                theme={editorTheme}
-                value={code}
-                onChange={(value) => !isCurrentLocked && setCode(value || '')}
-                options={{
-                  readOnly: isCurrentLocked,
-                  minimap: { enabled: false },
-                  fontSize: 13,
-                  fontFamily: "'Fira Code', 'Fragment Mono', monospace",
-                  lineNumbers: 'on',
-                  scrollBeyondLastLine: false,
-                  automaticLayout: true,
-                  folding: true,
-                  bracketPairColorization: { enabled: true },
-                  autoIndent: 'full',
-                  formatOnType: true,
-                  padding: { top: 12, bottom: 12 }
-                }}
-              />
+
+              <div className="h-[430px] w-full">
+                <Editor
+                  height="100%"
+                  language={language === 'cpp' ? 'cpp' : language}
+                  value={code}
+                  theme={editorTheme}
+                  onChange={(val) => !isCurrentLocked && setCode(val || '')}
+                  options={{
+                    fontSize: 13,
+                    fontFamily: 'JetBrains Mono, Menlo, monospace',
+                    minimap: { enabled: false },
+                    scrollBeyondLastLine: false,
+                    readOnly: isCurrentLocked,
+                    automaticLayout: true,
+                    lineNumbers: 'on',
+                    renderLineHighlight: 'all',
+                    padding: { top: 12, bottom: 12 }
+                  }}
+                />
+              </div>
             </div>
 
-            {/* Left Column Bottom Action Bar (Aptitude Style: Check Explanation, Lock In, Next) */}
-            <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-stone-200">
+            {/* Action Bar (Check AI Explanation, Reset, Lock In Solution, Next) */}
+            <div className="flex flex-wrap items-center justify-between gap-2.5 bg-white border border-stone-300 rounded-2xl p-3 shadow-2xs">
               <div className="flex items-center gap-2">
+                {/* Check AI Explanation Button (Aptitude style) */}
                 <button
                   onClick={handleCheckExplanation}
-                  className={`font-radio font-bold text-xs px-4 py-2.5 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 shadow-2xs ${
-                    isCurrentLocked
-                      ? 'bg-[#E2F0E0] hover:bg-[#D4E8D2] text-stone-900 active:scale-95'
-                      : 'bg-stone-100 hover:bg-stone-200 text-stone-600'
+                  disabled={!isCurrentLocked || isExplaining}
+                  className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-2xs ${
+                    showExplanation
+                      ? 'bg-emerald-700 text-white'
+                      : isCurrentLocked
+                      ? 'bg-[#EAF3EB] border border-[#B3D6B8] text-[#1E5629] hover:bg-[#D5EAD8]'
+                      : 'bg-stone-100 text-stone-400 border border-stone-200 cursor-not-allowed'
                   }`}
+                  title={isCurrentLocked ? "View step-by-step algorithmic breakdown" : "Lock in your solution first to unlock AI explanation"}
                 >
-                  <Sparkles className="w-4 h-4 text-emerald-700" />
+                  <Sparkles className="w-3.5 h-3.5" />
                   <span>{showExplanation ? 'Hide AI Explanation' : 'Check AI Explanation'}</span>
                 </button>
 
@@ -995,12 +1091,11 @@ export default function TechnicalRound() {
                   <div className="flex items-center gap-2">
                     <div className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-100 border border-emerald-400 text-emerald-900 font-bold text-xs">
                       <Lock className="w-3.5 h-3.5 text-emerald-600" />
-                      <span>Locked ({currentScore}/10)</span>
+                      <span>Locked ({evalScores[currentQId] || 0}/10)</span>
                     </div>
                     <button
                       onClick={handleUnlockSolution}
                       className="px-2.5 py-2 rounded-xl border border-stone-300 hover:bg-stone-100 text-stone-600 text-xs font-bold cursor-pointer transition-all flex items-center gap-1"
-                      title="Unlock solution to edit code"
                     >
                       <Unlock className="w-3.5 h-3.5 text-stone-500" />
                       <span>Edit</span>
@@ -1185,23 +1280,23 @@ export default function TechnicalRound() {
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     className={`p-3.5 rounded-xl border text-xs font-bold flex items-center gap-2.5 ${
-                      currentScore >= 7.5
+                      (evalScores[currentQId] || 0) >= 7.5
                         ? 'bg-emerald-50 border-emerald-400 text-emerald-950'
-                        : currentScore >= 4.0
+                        : (evalScores[currentQId] || 0) >= 4.0
                         ? 'bg-amber-50 border-amber-400 text-amber-950'
                         : 'bg-red-50 border-red-400 text-red-950'
                     }`}
                   >
                     <CheckCircle2 className={`w-5 h-5 shrink-0 ${
-                      currentScore >= 7.5 ? 'text-emerald-600' : currentScore >= 4.0 ? 'text-amber-600' : 'text-red-600'
+                      (evalScores[currentQId] || 0) >= 7.5 ? 'text-emerald-600' : (evalScores[currentQId] || 0) >= 4.0 ? 'text-amber-600' : 'text-red-600'
                     }`} />
                     <div className="flex-1">
                       <div className="flex items-center justify-between mb-0.5">
                         <p className="font-extrabold text-xs">
-                          {currentScore >= 7.5 ? 'Accepted Solution' : currentScore >= 4.0 ? 'Partially Correct' : 'Needs Improvement'}
+                          {(evalScores[currentQId] || 0) >= 7.5 ? 'Accepted Solution' : (evalScores[currentQId] || 0) >= 4.0 ? 'Partially Correct' : 'Needs Improvement'}
                         </p>
                         <span className="font-mono font-extrabold text-xs px-2 py-0.5 rounded bg-white/80 border border-black/10">
-                          {currentScore} / 10
+                          {evalScores[currentQId] || 0} / 10
                         </span>
                       </div>
                       <p className="text-[11px] font-normal opacity-90 leading-snug">
@@ -1239,7 +1334,7 @@ export default function TechnicalRound() {
                   }}
                   className="px-3 py-1.5 rounded-xl bg-white hover:bg-stone-100 border border-stone-300 text-stone-700 font-bold text-xs transition-all cursor-pointer flex items-center gap-1.5"
                 >
-                  {copiedToast ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                  {copiedToast ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
                   <span>{copiedToast ? 'Copied' : 'Copy'}</span>
                 </button>
               </div>
@@ -1307,57 +1402,80 @@ export default function TechnicalRound() {
       {/* Completion Modal */}
       <AnimatePresence>
         {showCompletionModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs select-none">
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs select-none">
             <motion.div
               initial={{ scale: 0.9, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.9, opacity: 0 }}
-              className="w-full max-w-md bg-white border-2 border-black rounded-3xl p-6 shadow-[6px_6px_0px_0px_#000000] text-center flex flex-col items-center gap-4 text-left"
+              className="w-full max-w-lg bg-white border-2 border-black rounded-3xl p-6 sm:p-8 shadow-[6px_6px_0px_0px_#000000] text-center flex flex-col items-center gap-4 text-left"
             >
               <div className="w-16 h-16 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center border-2 border-emerald-500 shadow-sm mx-auto">
                 <CheckCircle2 className="w-10 h-10" />
               </div>
 
-              <h2 className="font-serif text-2xl font-bold text-black text-center">
-                Technical Round Completed! 🎉
-              </h2>
+              <div>
+                <h2 className="font-serif text-2xl sm:text-3xl font-bold text-black text-center">
+                  Technical Round Completed! 🎉
+                </h2>
+                <p className="text-xs text-stone-600 text-center max-w-sm mt-1">
+                  Your code solutions and algorithmic performance have been recorded into your official AI performance dossier.
+                </p>
+              </div>
 
-              <p className="text-xs text-stone-600 text-center max-w-xs">
-                Your code implementations and algorithmic solutions have been evaluated and recorded into your performance dossier.
-              </p>
-
-              <div className="w-full bg-[#FAF4E5] border border-stone-300 rounded-2xl p-4 flex flex-col gap-2 font-radio text-xs">
-                <div className="flex items-center justify-between border-b border-stone-200 pb-2">
-                  <span className="text-stone-600">Total Problems:</span>
-                  <span className="font-bold text-black">{finalProblemsList.length}</span>
-                </div>
-                <div className="flex items-center justify-between border-b border-stone-200 pb-2">
-                  <span className="text-stone-600">Problems Locked:</span>
-                  <span className="font-bold text-emerald-700">{completedCount}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-stone-600">Average Score:</span>
-                  <span className="font-bold text-black text-sm">
-                    {completedCount > 0
-                      ? (Object.values(evalScores).reduce((a, b) => a + b, 0) / completedCount).toFixed(1)
-                      : '0.0'} / 10
+              {/* Assessment Statistics Grid */}
+              <div className="w-full bg-[#FAF7ED] border-2 border-black rounded-2xl p-4 sm:p-5 flex flex-col gap-3 font-radio text-xs">
+                <div className="flex items-center justify-between pb-2 border-b border-stone-200">
+                  <span className="font-fragment font-extrabold text-[10px] text-stone-500 uppercase tracking-wider">
+                    OVERALL EVALUATION
                   </span>
+                  <span className={`px-2.5 py-0.5 rounded-full font-bold text-[11px] border ${
+                    Number(finalAvgScore) >= 7.5 ? 'bg-emerald-100 text-emerald-900 border-emerald-300' :
+                    Number(finalAvgScore) >= 5.0 ? 'bg-amber-100 text-amber-900 border-amber-300' :
+                    'bg-red-100 text-red-900 border-red-300'
+                  }`}>
+                    {Number(finalAvgScore) >= 7.5 ? 'Passed / High Readiness' : Number(finalAvgScore) >= 5.0 ? 'Competent' : 'Needs Practice'}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-center">
+                  <div className="bg-white p-2.5 rounded-xl border border-stone-200 shadow-2xs">
+                    <span className="text-[10px] font-bold text-stone-500 uppercase block">Attempted</span>
+                    <span className="font-extrabold text-sm text-black">{completedCount} / {totalCount}</span>
+                  </div>
+                  <div className="bg-white p-2.5 rounded-xl border border-stone-200 shadow-2xs">
+                    <span className="text-[10px] font-bold text-emerald-700 uppercase block">Correct</span>
+                    <span className="font-extrabold text-sm text-emerald-700">✅ {correctCount}</span>
+                  </div>
+                  <div className="bg-white p-2.5 rounded-xl border border-stone-200 shadow-2xs">
+                    <span className="text-[10px] font-bold text-red-700 uppercase block">Wrong / Sub</span>
+                    <span className="font-extrabold text-sm text-red-700">❌ {wrongCount}</span>
+                  </div>
+                  <div className="bg-white p-2.5 rounded-xl border border-stone-200 shadow-2xs">
+                    <span className="text-[10px] font-bold text-stone-500 uppercase block">Accuracy</span>
+                    <span className="font-extrabold text-sm text-black">{finalAccuracy}%</span>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between pt-2 border-t border-stone-200">
+                  <span className="text-stone-600 font-bold">Average Score:</span>
+                  <span className="font-extrabold text-base text-black">{finalAvgScore} / 10</span>
                 </div>
               </div>
 
               <div className="flex flex-col sm:flex-row items-center gap-3 w-full mt-2">
                 <button
-                  onClick={() => navigate('/dashboard')}
+                  onClick={() => setShowCompletionModal(false)}
                   className="w-full sm:w-1/2 bg-white border-2 border-black text-black font-radio font-bold text-xs py-3 rounded-xl hover:bg-stone-100 transition-all cursor-pointer text-center"
                 >
-                  Back to Dashboard
+                  Review Solutions
                 </button>
 
                 <button
                   onClick={() => navigate('/full-report')}
-                  className="w-full sm:w-1/2 bg-black hover:bg-stone-800 text-white font-radio font-bold text-xs py-3 rounded-xl transition-all cursor-pointer shadow-md text-center"
+                  className="w-full sm:w-1/2 bg-black hover:bg-stone-800 text-white font-radio font-bold text-xs py-3 rounded-xl transition-all cursor-pointer shadow-md text-center flex items-center justify-center gap-1.5"
                 >
-                  View Full Dossier →
+                  <Award className="w-4 h-4 text-amber-400" />
+                  <span>View Full AI Report →</span>
                 </button>
               </div>
             </motion.div>

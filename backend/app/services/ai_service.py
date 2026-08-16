@@ -71,13 +71,25 @@ def is_code_stub_or_empty(code: str) -> bool:
     if not meaningful:
         return True
 
-    # Common stubs
+    # Filter out function/class signature lines and brackets
+    body_lines = []
+    for l in meaningful:
+        if (l.startswith(("def ", "function ", "class ", "public ", "private ", "protected ", "import ", "const ", "let ", "var ")) and (l.endswith((":", "{", ";")) or "=>" in l)):
+            continue
+        if l in ("{", "}", "{};", "};"):
+            continue
+        body_lines.append(l)
+
+    if not body_lines:
+        return True
+
     stub_tokens = {
-        "pass", "return", "return None", "return null", "return false",
-        "return true", "return 0", "def solution():", "def solution(): pass",
-        "function solution() {}", "{", "}", "public class Solution {", "}"
+        "pass", "...", "return", "return None", "return null", "return false",
+        "return true", "return 0", "return []", "return {};", "return [];",
+        "return null;", "return false;", "return true;", "return 0;",
+        "throw new Error('Not implemented');", "throw new UnsupportedOperationException();"
     }
-    filtered = [l for l in meaningful if l not in stub_tokens and not l.startswith("console.log") and not l.startswith("print")]
+    filtered = [l for l in body_lines if l not in stub_tokens and not l.startswith(("console.log", "print"))]
     return len(filtered) == 0
 
 def grade_technical_solution(question: str, code: str, language: str = "javascript") -> Dict[str, Any]:
@@ -395,17 +407,59 @@ def grade_behavioral_response(question: str, answer_text: str) -> Dict[str, Any]
 
 def grade_aptitude_response(question: str, answer_text: str) -> Dict[str, Any]:
     """
-    Grades an aptitude answer selection.
+    Grades an aptitude answer selection by comparing against stored correct option or evaluating via AI.
     """
     ans = (answer_text or "").strip().upper()
-    if ans in ["A", "B", "C", "D"]:
+    if not ans or ans not in ["A", "B", "C", "D"]:
         return {
-            "score": 10.0,
-            "feedback": f"Choice recorded: {ans}. Final score calculated from correct answers pool."
+            "score": 0.0,
+            "feedback": "No valid option choice submitted."
         }
+
+    q_text = (question or "").strip()
+    correct_opt = None
+
+    # Check if [CORRECT: X] marker is present in question text
+    if "[CORRECT:" in q_text:
+        try:
+            marker = q_text.split("[CORRECT:")[1].split("]")[0].strip().upper()
+            if marker in ["A", "B", "C", "D"]:
+                correct_opt = marker
+        except Exception:
+            pass
+
+    if correct_opt:
+        if ans == correct_opt:
+            return {
+                "score": 10.0,
+                "feedback": f"Correct! Option {ans} is the correct answer."
+            }
+        else:
+            return {
+                "score": 0.0,
+                "feedback": f"Incorrect. You selected Option {ans}, but the correct answer is Option {correct_opt}."
+            }
+
+    # Fallback to AI evaluation if correct_option marker is not directly embedded
+    try:
+        explanation_data = generate_aptitude_explanation(question=q_text, selected_option=ans)
+        if isinstance(explanation_data, dict) and explanation_data.get("correct") is True:
+            return {
+                "score": 10.0,
+                "feedback": f"Correct! Option {ans} is verified correct by AI analysis."
+            }
+        else:
+            corr_b = explanation_data.get("correctOption", "different") if isinstance(explanation_data, dict) else ""
+            return {
+                "score": 0.0,
+                "feedback": f"Incorrect. Option {ans} is incorrect. The correct answer is Option {corr_b}."
+            }
+    except Exception as e:
+        logger.warning(f"AI aptitude grading fallback failed: {e}")
+
     return {
         "score": 0.0,
-        "feedback": "No valid option choice submitted."
+        "feedback": f"Choice recorded: {ans}."
     }
 
 def generate_aptitude_explanation(question: str, options: list = None, selected_option: str = None, question_id: str = None, correct_option: str = None) -> Dict[str, Any]:

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { ArrowLeft, Timer, CheckCircle2, HelpCircle, Pause, Play, RotateCcw, AlertCircle, Plus, Lock, Sparkles, Bookmark, Copy, Trash2, RefreshCw, Check } from 'lucide-react'
+import { ArrowLeft, Timer, CheckCircle2, HelpCircle, Pause, Play, RotateCcw, AlertCircle, Plus, Lock, Sparkles, Bookmark, Copy, Trash2, RefreshCw, Check, Award } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 
 const APTITUDE_QUESTIONS = [
@@ -61,15 +61,20 @@ export default function AptitudeRound() {
   // Map backend questions to PROBLEM shapes
   const mappedQuestions = backendQuestions.map((bq) => {
     // Parse Options: A) ... | B) ... | C) ... | D) ...
-    let questionTitle = bq.questionText || ''
+    let rawText = bq.questionText || ''
+    if (rawText.includes(' [CORRECT:')) {
+      rawText = rawText.split(' [CORRECT:')[0]
+    }
+
+    let questionTitle = rawText
     let options = ['A) Option A', 'B) Option B', 'C) Option C', 'D) Option D']
 
-    if (questionTitle.includes(' Options: ')) {
-      const parts = questionTitle.split(' Options: ')
+    if (rawText.includes(' Options: ')) {
+      const parts = rawText.split(' Options: ')
       questionTitle = parts[0]
       const optStr = parts[1]
       if (optStr.includes(' | ')) {
-        options = optStr.split(' | ')
+        options = optStr.split(' | ').map(o => o.trim())
       }
     }
 
@@ -100,6 +105,7 @@ export default function AptitudeRound() {
   const [showCompletionModal, setShowCompletionModal] = useState(false)
   const [evalScore, setEvalScore] = useState(null)
   const [evalFeedback, setEvalFeedback] = useState('')
+  const [roundSummary, setRoundSummary] = useState(null)
 
   const currentQ = finalQuestionsList[currentIdx]
   const currentQId = currentQ.questionId || currentQ.id
@@ -260,15 +266,17 @@ export default function AptitudeRound() {
         throw new Error('No active user session. Please log in.')
       }
 
-      const firstCount = finalQuestionsList.length - 1
-      const firstPart = finalQuestionsList.slice(0, firstCount)
-      const lastQ = finalQuestionsList[firstCount]
+      // Filter only questions where user provided/locked an answer
+      const answeredQuestions = finalQuestionsList.filter(q => {
+        const qId = q.questionId || q.id
+        return answers[qId] !== undefined && answers[qId] !== null
+      })
 
-      // Submit first 49 (or all but last) in parallel
-      const firstPromises = firstPart.map(async (q) => {
+      // Submit only answered questions that haven't been saved yet
+      const submitPromises = answeredQuestions.map(async (q) => {
         const qId = q.questionId || q.id
         const savedOptionIdx = answers[qId]
-        const letter = (savedOptionIdx !== undefined && savedOptionIdx !== null) ? ['A', 'B', 'C', 'D'][savedOptionIdx] : 'unanswered'
+        const letter = ['A', 'B', 'C', 'D'][savedOptionIdx]
 
         return fetch(`${import.meta.env.VITE_API_BASE_URL}/round/${roundId}/answer?question_id=${qId}`, {
           method: 'POST',
@@ -282,32 +290,63 @@ export default function AptitudeRound() {
         })
       })
 
-      await Promise.all(firstPromises)
+      await Promise.all(submitPromises)
 
-      // Submit the last question sequentially to trigger final evaluation
-      const lastQId = lastQ.questionId || lastQ.id
-      const lastOptionIdx = answers[lastQId]
-      const lastLetter = (lastOptionIdx !== undefined && lastOptionIdx !== null) ? ['A', 'B', 'C', 'D'][lastOptionIdx] : 'unanswered'
+      // Call /finish endpoint to finalize the round and compute official score breakdown
+      let summaryData = null
+      if (roundId) {
+        try {
+          const finishRes = await fetch(`${import.meta.env.VITE_API_BASE_URL}/round/${roundId}/finish`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${session.access_token}`
+            }
+          })
 
-      const res = await fetch(`${import.meta.env.VITE_API_BASE_URL}/round/${roundId}/answer?question_id=${lastQId}`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${session.access_token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          answerText: lastLetter
-        })
-      })
-
-      if (!res.ok) {
-        const errData = await res.json()
-        throw new Error(errData.detail || 'Failed to submit final assessment')
+          if (finishRes.ok) {
+            summaryData = await finishRes.json()
+          }
+        } catch (fErr) {
+          console.warn('Finish endpoint failed, fallback to client calculations:', fErr)
+        }
       }
 
-      const data = await res.json()
-      setEvalScore(data.overallScore || data.score)
-      setEvalFeedback(data.feedback)
+      if (!summaryData || summaryData.questionsAttempted === undefined) {
+        const totalQs = finalQuestionsList.length
+        const attemptedQs = Object.keys(answers).length
+        const unattemptedQs = Math.max(0, totalQs - attemptedQs)
+
+        let correctCount = 0
+        finalQuestionsList.forEach(q => {
+          const qId = q.questionId || q.id
+          const userChoice = answers[qId]
+          if (userChoice !== undefined && userChoice !== null) {
+            const letter = ['A', 'B', 'C', 'D'][userChoice]
+            if (letter === q.correctOption || userChoice === q.correctOption) {
+              correctCount++
+            }
+          }
+        })
+        const wrongCount = Math.max(0, attemptedQs - correctCount)
+        const accuracyPct = attemptedQs > 0 ? Math.round((correctCount / attemptedQs) * 100) : 0
+
+        summaryData = {
+          status: 'completed',
+          totalQuestions: totalQs,
+          questionsAttempted: attemptedQs,
+          correctAnswers: correctCount,
+          wrongAnswers: wrongCount,
+          unattempted: unattemptedQs,
+          accuracyPercentage: accuracyPct,
+          score: correctCount,
+          maxScore: totalQs,
+          overallScore: correctCount
+        }
+      }
+
+      setRoundSummary(summaryData)
+      setEvalScore(summaryData.score !== undefined ? summaryData.score : summaryData.overallScore)
+
       setIsSubmitted(true)
       setIsTimerActive(false)
       setShowCompletionModal(true)
@@ -812,50 +851,91 @@ export default function AptitudeRound() {
               initial={{ scale: 0.9, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.9, opacity: 0 }}
-              className="w-full max-w-md bg-white border-2 border-black rounded-3xl p-6 shadow-[6px_6px_0px_0px_#000000] text-center flex flex-col items-center gap-4"
+              className="w-full max-w-lg bg-white border-2 border-black rounded-3xl p-6 sm:p-8 shadow-[6px_6px_0px_0px_#000000] text-center flex flex-col items-center gap-4 text-left"
             >
-              <div className="w-16 h-16 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center border-2 border-emerald-500 shadow-sm">
+              <div className="w-16 h-16 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center border-2 border-emerald-500 shadow-sm mx-auto">
                 <CheckCircle2 className="w-10 h-10" />
               </div>
 
               <div>
-                <h2 className="font-serif text-2xl font-bold text-black">
+                <h2 className="font-serif text-2xl sm:text-3xl font-bold text-black text-center">
                   Assessment Completed! 🎉
                 </h2>
-                <p className="text-xs text-stone-600 mt-1">
-                  Your Aptitude & Quantitative Reasoning test has been submitted and evaluated.
+                <p className="text-xs text-stone-600 text-center max-w-sm mt-1">
+                  Your Aptitude & Quantitative Reasoning test has been submitted and recorded in your official performance dossier.
                 </p>
               </div>
 
-              <div className="w-full bg-[#FAF7ED] border border-stone-300 rounded-2xl p-4 flex flex-col gap-2 text-left">
-                <div className="flex items-center justify-between text-xs font-bold text-stone-700">
-                  <span>Score Evaluated:</span>
-                  <span className="text-emerald-700 font-extrabold text-base">{evalScore !== null ? evalScore : 0} / 10</span>
+              {/* Assessment Statistics Grid */}
+              <div className="w-full bg-[#FAF7ED] border-2 border-black rounded-2xl p-4 sm:p-5 flex flex-col gap-3 font-radio text-xs">
+                <div className="flex items-center justify-between pb-2 border-b border-stone-200">
+                  <span className="font-fragment font-extrabold text-[10px] text-stone-500 uppercase tracking-wider">
+                    OVERALL EVALUATION
+                  </span>
+                  <span className={`px-2.5 py-0.5 rounded-full font-bold text-[11px] border ${
+                    (evalScore || 0) >= 7.5 ? 'bg-emerald-100 text-emerald-900 border-emerald-300' :
+                    (evalScore || 0) >= 5.0 ? 'bg-amber-100 text-amber-900 border-amber-300' :
+                    'bg-red-100 text-red-900 border-red-300'
+                  }`}>
+                    {(evalScore || 0) >= 7.5 ? 'Passed / High Readiness' : (evalScore || 0) >= 5.0 ? 'Competent' : 'Needs Practice'}
+                  </span>
                 </div>
-                <div className="flex items-center justify-between text-xs text-stone-600">
-                  <span>Locked Answers:</span>
-                  <span>{Object.keys(lockedAnswers).length} / {finalQuestionsList.length}</span>
+
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-center">
+                  <div className="bg-white p-2 rounded-xl border border-stone-200 shadow-2xs">
+                    <span className="text-[10px] font-bold text-stone-500 uppercase block">Attempted</span>
+                    <span className="font-extrabold text-xs text-black">
+                      {roundSummary?.questionsAttempted !== undefined ? roundSummary.questionsAttempted : Object.keys(lockedAnswers).length} / {roundSummary?.totalQuestions !== undefined ? roundSummary.totalQuestions : finalQuestionsList.length}
+                    </span>
+                  </div>
+                  <div className="bg-white p-2 rounded-xl border border-stone-200 shadow-2xs">
+                    <span className="text-[10px] font-bold text-emerald-700 uppercase block">Correct</span>
+                    <span className="font-extrabold text-xs text-emerald-700">
+                      ✅ {roundSummary?.correctAnswers !== undefined ? roundSummary.correctAnswers : 0}
+                    </span>
+                  </div>
+                  <div className="bg-white p-2 rounded-xl border border-stone-200 shadow-2xs">
+                    <span className="text-[10px] font-bold text-red-700 uppercase block">Wrong</span>
+                    <span className="font-extrabold text-xs text-red-700">
+                      ❌ {roundSummary?.wrongAnswers !== undefined ? roundSummary.wrongAnswers : 0}
+                    </span>
+                  </div>
+                  <div className="bg-white p-2 rounded-xl border border-stone-200 shadow-2xs">
+                    <span className="text-[10px] font-bold text-amber-700 uppercase block">Unanswered</span>
+                    <span className="font-extrabold text-xs text-amber-700">
+                      ⏳ {roundSummary?.unattempted !== undefined ? roundSummary.unattempted : Math.max(0, finalQuestionsList.length - Object.keys(lockedAnswers).length)}
+                    </span>
+                  </div>
+                  <div className="bg-white p-2 rounded-xl border border-stone-200 shadow-2xs col-span-2 sm:col-span-1">
+                    <span className="text-[10px] font-bold text-stone-500 uppercase block">Accuracy</span>
+                    <span className="font-extrabold text-xs text-black">
+                      {roundSummary?.accuracyPercentage !== undefined ? roundSummary.accuracyPercentage : 0}%
+                    </span>
+                  </div>
                 </div>
-                <div className="flex items-center justify-between text-xs text-stone-600">
-                  <span>Time Elapsed:</span>
-                  <span>{formatTime(900 - timeLeft)}</span>
+
+                <div className="flex items-center justify-between pt-2 border-t border-stone-200">
+                  <span className="text-stone-600 font-bold">Aptitude Score:</span>
+                  <span className="font-extrabold text-base text-black">
+                    {roundSummary?.score !== undefined ? roundSummary.score : (roundSummary?.correctAnswers !== undefined ? roundSummary.correctAnswers : 0)} / {roundSummary?.maxScore !== undefined ? roundSummary.maxScore : finalQuestionsList.length}
+                  </span>
                 </div>
               </div>
 
-              <div className="flex items-center justify-center gap-3 w-full mt-2">
+              <div className="flex flex-col sm:flex-row items-center gap-3 w-full mt-2">
                 <button
                   onClick={() => setShowCompletionModal(false)}
-                  className="w-1/2 bg-white border-2 border-black text-black font-radio font-bold text-xs py-3 rounded-xl hover:bg-stone-100 transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                  className="w-full sm:w-1/2 bg-white border-2 border-black text-black font-radio font-bold text-xs py-3 rounded-xl hover:bg-stone-100 transition-all cursor-pointer flex items-center justify-center gap-1.5 text-center"
                 >
-                  <span>Review Solutions</span>
+                  Review Solutions
                 </button>
 
                 <button
                   onClick={() => navigate('/full-report')}
-                  className="w-1/2 bg-black text-white font-radio font-bold text-xs py-3 rounded-xl hover:bg-stone-800 transition-all cursor-pointer flex items-center justify-center gap-1.5 shadow-md active:scale-95"
+                  className="w-full sm:w-1/2 bg-black text-white font-radio font-bold text-xs py-3 rounded-xl hover:bg-stone-800 transition-all cursor-pointer flex items-center justify-center gap-1.5 shadow-md active:scale-95 text-center"
                 >
-                  <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                  <span>View Full Report</span>
+                  <Award className="w-4 h-4 text-amber-400" />
+                  <span>View Full AI Report →</span>
                 </button>
               </div>
             </motion.div>

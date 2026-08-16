@@ -175,8 +175,8 @@ export default function FullReport() {
     },
     {
       name: 'Aptitude',
-      score: Math.round(((analytics.aptitude.averageScore / 50.0) * 10) * 10) / 10,
-      fillColor: getScoreColor((analytics.aptitude.averageScore / 50.0) * 10)
+      score: analytics.aptitude.averageScore,
+      fillColor: getScoreColor(analytics.aptitude.averageScore)
     }
   ]
 
@@ -354,23 +354,27 @@ export default function FullReport() {
                 </div>
               </div>
 
-              {/* 4 Stat Badges */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-6 pt-4 border-t border-stone-200 text-left font-radio">
-                <div className="p-3 bg-white rounded-xl border border-stone-200">
-                  <span className="text-[10px] text-stone-400 font-bold uppercase block">Completed Sessions</span>
-                  <span className="font-extrabold text-sm text-black">{analytics.overview.totalCompletedRounds} Rounds</span>
+              {/* Stat Badges Grid (Attempted, Correct, Wrong, Accuracy) */}
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mt-6 pt-4 border-t border-stone-200 text-left font-radio">
+                <div className="p-3 bg-white rounded-xl border border-stone-200 shadow-2xs">
+                  <span className="text-[10px] text-stone-400 font-bold uppercase block">Rounds Done</span>
+                  <span className="font-extrabold text-sm text-black">{analytics.overview.totalCompletedRounds} Sessions</span>
                 </div>
-                <div className="p-3 bg-white rounded-xl border border-stone-200">
-                  <span className="text-[10px] text-stone-400 font-bold uppercase block">Questions Solved</span>
-                  <span className="font-extrabold text-sm text-black">{analytics.overview.totalQuestionsAnswered} Questions</span>
+                <div className="p-3 bg-white rounded-xl border border-stone-200 shadow-2xs">
+                  <span className="text-[10px] text-stone-400 font-bold uppercase block">Qs Attempted</span>
+                  <span className="font-extrabold text-sm text-black">{analytics.overview.totalQuestionsAnswered} Qs</span>
                 </div>
-                <div className="p-3 bg-white rounded-xl border border-stone-200">
-                  <span className="text-[10px] text-stone-400 font-bold uppercase block">Strongest Domain</span>
-                  <span className="font-extrabold text-xs text-emerald-700">{analytics.overview.strongestArea}</span>
+                <div className="p-3 bg-white rounded-xl border border-stone-200 shadow-2xs">
+                  <span className="text-[10px] text-emerald-700 font-bold uppercase block">Correct</span>
+                  <span className="font-extrabold text-sm text-emerald-700">✅ {analytics.overview.totalQuestionsCorrect || 0}</span>
                 </div>
-                <div className="p-3 bg-white rounded-xl border border-stone-200">
-                  <span className="text-[10px] text-stone-400 font-bold uppercase block">Priority Focus</span>
-                  <span className="font-extrabold text-xs text-amber-700">{analytics.overview.weakestArea}</span>
+                <div className="p-3 bg-white rounded-xl border border-stone-200 shadow-2xs">
+                  <span className="text-[10px] text-red-700 font-bold uppercase block">Wrong / Sub</span>
+                  <span className="font-extrabold text-sm text-red-700">❌ {analytics.overview.totalQuestionsWrong || 0}</span>
+                </div>
+                <div className="p-3 bg-white rounded-xl border border-stone-200 shadow-2xs col-span-2 sm:col-span-1">
+                  <span className="text-[10px] text-stone-400 font-bold uppercase block">Overall Accuracy</span>
+                  <span className="font-extrabold text-sm text-black">{analytics.overview.overallAccuracyPercentage || 0}%</span>
                 </div>
               </div>
             </section>
@@ -469,13 +473,13 @@ export default function FullReport() {
                         Quantitative Aptitude & Pacing
                       </span>
                       <span className="font-extrabold text-xs text-amber-700 px-2 py-0.5 bg-amber-50 rounded border border-amber-200">
-                        {competencyMatrix.quantitativePacing ? competencyMatrix.quantitativePacing.score : Math.round((analytics.aptitude.averageScore / 50.0) * 10)} / 10
+                        {competencyMatrix.quantitativePacing ? competencyMatrix.quantitativePacing.score : analytics.aptitude.averageScore} / 10
                       </span>
                     </div>
                     <div className="w-full h-2 bg-stone-200 rounded-full overflow-hidden mb-2">
                       <div
                         className="h-full bg-amber-600 rounded-full"
-                        style={{ width: `${((competencyMatrix.quantitativePacing ? competencyMatrix.quantitativePacing.score : (analytics.aptitude.averageScore / 50.0) * 10) / 10) * 100}%` }}
+                        style={{ width: `${((competencyMatrix.quantitativePacing ? competencyMatrix.quantitativePacing.score : analytics.aptitude.averageScore) / 10) * 100}%` }}
                       />
                     </div>
                     <p className="text-[11px] text-stone-600 leading-snug">
@@ -618,7 +622,7 @@ export default function FullReport() {
                       APTITUDE & QUANTITATIVE REASONING
                     </span>
                     <span className="font-radio font-extrabold text-base text-amber-700">
-                      {analytics.aptitude.averageScore} / 50
+                      {analytics.aptitude.averageScore} / 10
                     </span>
                   </div>
                   <div className="grid grid-cols-4 gap-2 mb-3 text-center bg-white p-2.5 rounded-xl border border-stone-200">
@@ -628,11 +632,11 @@ export default function FullReport() {
                     </div>
                     <div>
                       <span className="text-[10px] text-stone-500 font-bold block">Avg Score</span>
-                      <span className="font-extrabold text-xs text-black">{analytics.aptitude.averageScore} / 50</span>
+                      <span className="font-extrabold text-xs text-black">{analytics.aptitude.averageScore} / 10</span>
                     </div>
                     <div>
                       <span className="text-[10px] text-stone-500 font-bold block">Best Score</span>
-                      <span className="font-extrabold text-xs text-amber-800">{analytics.aptitude.bestScore} / 50</span>
+                      <span className="font-extrabold text-xs text-amber-800">{analytics.aptitude.bestScore} / 10</span>
                     </div>
                     <div>
                       <span className="text-[10px] text-stone-500 font-bold block">Accuracy</span>
@@ -640,7 +644,7 @@ export default function FullReport() {
                     </div>
                   </div>
                   <p className="text-xs text-stone-700 leading-relaxed">
-                    Evaluates numerical estimation, deductive logic, and pacing under standardized 15-minute global timer constraints across full 50-question assessments.
+                    Evaluates numerical estimation, deductive logic, and pacing under standardized timed aptitude assessments.
                   </p>
                 </div>
               </div>
@@ -804,16 +808,18 @@ export default function FullReport() {
               </div>
 
               {filteredHistory && filteredHistory.length > 0 ? (
-                <div className="border-2 border-black rounded-2xl overflow-hidden shadow-xs">
-                  <table className="w-full text-left border-collapse text-xs font-radio">
+                <div className="border-2 border-black rounded-2xl overflow-x-auto shadow-xs bg-white">
+                  <table className="w-full text-left border-collapse text-xs font-radio min-w-[700px]">
                     <thead>
                       <tr className="bg-[#FAF7ED] border-b-2 border-black font-extrabold uppercase text-stone-600 tracking-wider">
                         <th className="py-3 px-4">Session Name</th>
-                        <th className="py-3 px-4">Category</th>
-                        <th className="py-3 px-4">Questions</th>
-                        <th className="py-3 px-4">Score</th>
-                        <th className="py-3 px-4">Date</th>
-                        <th className="py-3 px-4 text-right">Status</th>
+                        <th className="py-3 px-3">Category</th>
+                        <th className="py-3 px-3 text-center">Attempted</th>
+                        <th className="py-3 px-3 text-center">Correct</th>
+                        <th className="py-3 px-3 text-center">Wrong</th>
+                        <th className="py-3 px-3 text-center">Accuracy</th>
+                        <th className="py-3 px-3 text-center">Score</th>
+                        <th className="py-3 px-4 text-right">Date</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-stone-200 bg-white">
@@ -825,30 +831,34 @@ export default function FullReport() {
                             }`} />
                             <span>{item.name}</span>
                           </td>
-                          <td className="py-3 px-4">
+                          <td className="py-3 px-3">
                             <span className={`font-bold uppercase text-[10px] px-2 py-0.5 rounded ${
                               item.roundType === 'technical'
-                                ? 'bg-emerald-50 text-emerald-800'
+                                ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
                                 : item.roundType === 'behavioral'
-                                ? 'bg-blue-50 text-blue-800'
-                                : 'bg-amber-50 text-amber-800'
+                                ? 'bg-blue-50 text-blue-800 border border-blue-200'
+                                : 'bg-amber-50 text-amber-800 border border-amber-200'
                             }`}>
                               {item.roundType}
                             </span>
                           </td>
-                          <td className="py-3 px-4 text-stone-600 font-semibold">
-                            {item.questionsCount} Qs
+                          <td className="py-3 px-3 text-stone-700 font-semibold text-center">
+                            {item.questionsAttempted || item.questionsCount} / {item.questionsCount}
                           </td>
-                          <td className="py-3 px-4 font-extrabold text-black">
-                            {item.score} <span className="text-stone-400 font-normal">/ {item.maxScore}</span>
+                          <td className="py-3 px-3 font-bold text-emerald-700 text-center">
+                            ✅ {item.correctCount !== undefined ? item.correctCount : (item.score >= 7.0 ? 1 : 0)}
                           </td>
-                          <td className="py-3 px-4 text-stone-500 font-medium">
+                          <td className="py-3 px-3 font-bold text-red-700 text-center">
+                            ❌ {item.wrongCount !== undefined ? item.wrongCount : Math.max(0, (item.questionsAttempted || 1) - (item.correctCount || 0))}
+                          </td>
+                          <td className="py-3 px-3 font-extrabold text-black text-center">
+                            {item.accuracyPercentage !== undefined ? `${item.accuracyPercentage}%` : `${Math.round((item.score / item.maxScore) * 100)}%`}
+                          </td>
+                          <td className="py-3 px-3 font-extrabold text-black text-center">
+                            {item.roundType === 'aptitude' ? (item.correctCount !== undefined ? item.correctCount : Math.round((item.score / 10) * item.questionsCount)) : item.score} <span className="text-stone-400 font-normal">/ {item.roundType === 'aptitude' ? item.questionsCount : 10}</span>
+                          </td>
+                          <td className="py-3 px-4 text-stone-500 font-medium text-right">
                             {item.formattedDate || item.daysAgo}
-                          </td>
-                          <td className="py-3 px-4 text-right">
-                            <span className="bg-emerald-50 text-emerald-800 text-[10px] font-bold px-2 py-0.5 rounded-full border border-emerald-200">
-                              Completed
-                            </span>
                           </td>
                         </tr>
                       ))}

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { ArrowLeft, Wifi, WifiOff, Volume2, Mic, MicOff, Brain, AlertCircle, Sparkles, Award } from 'lucide-react'
+import { ArrowLeft, Wifi, WifiOff, Volume2, Mic, MicOff, Brain, AlertCircle, Sparkles, Award, CheckCircle2 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useInterviewSocket } from '../hooks/useInterviewSocket'
 
@@ -48,6 +48,9 @@ export default function BehavioralRound() {
   const [evalFeedback, setEvalFeedback] = useState('')
   const [starBreakdown, setStarBreakdown] = useState(null)
   const [evalError, setEvalError] = useState(null)
+  const [showCompletionModal, setShowCompletionModal] = useState(false)
+  const [roundSummary, setRoundSummary] = useState(null)
+  const [isSubmittingAll, setIsSubmittingAll] = useState(false)
 
   // Real-time Voice Agent Hook
   const resumeText = "Candidate pursuing software role with experience in system design and teamwork."
@@ -167,6 +170,32 @@ export default function BehavioralRound() {
     }
   }, [status])
 
+  const handleSubmitAssessmentAll = async () => {
+    if (isSubmittingAll) return
+    setIsSubmittingAll(true)
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (session && roundId) {
+        const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/round/${roundId}/finish`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${session.access_token}`
+          }
+        })
+        if (response.ok) {
+          const data = await response.json()
+          setRoundSummary(data)
+        }
+      }
+    } catch (err) {
+      console.warn('Error finalizing behavioral round:', err)
+    } finally {
+      setIsSubmittingAll(false)
+      setShowCompletionModal(true)
+    }
+  }
+
   return (
     <div className="min-h-screen bg-[#FAF7ED] text-black font-radio selection:bg-parker-red selection:text-white flex flex-col justify-between">
       {/* Hidden Audio Tag for DOM Mounting */}
@@ -188,7 +217,7 @@ export default function BehavioralRound() {
           </span>
         </div>
 
-        <div className="flex items-center gap-6 font-radio text-sm font-bold text-stone-600">
+        <div className="flex items-center gap-4 font-radio text-sm font-bold text-stone-600">
           <div className="flex items-center gap-1.5 text-xs font-semibold">
             {isConnected ? (
               <span className="text-emerald-700 flex items-center gap-1">
@@ -200,8 +229,13 @@ export default function BehavioralRound() {
               </span>
             )}
           </div>
-          <button onClick={() => navigate('/dashboard')} className="hover:text-black transition-colors cursor-pointer">
-            End Interview
+          <button
+            onClick={handleSubmitAssessmentAll}
+            disabled={isSubmittingAll}
+            className="bg-black hover:bg-stone-800 text-white font-radio font-bold text-xs px-4 py-2 rounded-xl transition-all cursor-pointer shadow-xs flex items-center gap-1.5 active:scale-95"
+          >
+            <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+            <span>{isSubmittingAll ? 'Submitting...' : 'Submit Assessment'}</span>
           </button>
         </div>
       </header>
@@ -428,6 +462,100 @@ export default function BehavioralRound() {
           )}
         </AnimatePresence>
       </main>
+
+      {/* Completion Modal */}
+      <AnimatePresence>
+        {showCompletionModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs select-none">
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="w-full max-w-lg bg-white border-2 border-black rounded-3xl p-6 sm:p-8 shadow-[6px_6px_0px_0px_#000000] text-center flex flex-col items-center gap-4 text-left"
+            >
+              <div className="w-16 h-16 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center border-2 border-emerald-500 shadow-sm mx-auto">
+                <CheckCircle2 className="w-10 h-10" />
+              </div>
+
+              <div>
+                <h2 className="font-serif text-2xl sm:text-3xl font-bold text-black text-center">
+                  Behavioral Round Completed! 🎉
+                </h2>
+                <p className="text-xs text-stone-600 text-center max-w-sm mt-1">
+                  Your STAR communication, executive presence, and behavioral responses have been analyzed and recorded.
+                </p>
+              </div>
+
+              {/* Assessment Statistics Grid */}
+              <div className="w-full bg-[#FAF7ED] border-2 border-black rounded-2xl p-4 sm:p-5 flex flex-col gap-3 font-radio text-xs">
+                <div className="flex items-center justify-between pb-2 border-b border-stone-200">
+                  <span className="font-fragment font-extrabold text-[10px] text-stone-500 uppercase tracking-wider">
+                    STAR EVALUATION SUMMARY
+                  </span>
+                  <span className={`px-2.5 py-0.5 rounded-full font-bold text-[11px] border ${
+                    (evalScore || 0) >= 7.5 ? 'bg-emerald-100 text-emerald-900 border-emerald-300' :
+                    (evalScore || 0) >= 5.0 ? 'bg-amber-100 text-amber-900 border-amber-300' :
+                    'bg-red-100 text-red-900 border-red-300'
+                  }`}>
+                    {(evalScore || 0) >= 7.5 ? 'Executive Ready' : (evalScore || 0) >= 5.0 ? 'Proficient' : 'Developing'}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-center">
+                  <div className="bg-white p-2.5 rounded-xl border border-stone-200 shadow-2xs">
+                    <span className="text-[10px] font-bold text-stone-500 uppercase block">Attempted</span>
+                    <span className="font-extrabold text-sm text-black">
+                      {roundSummary ? roundSummary.questionsAttempted : (evalScore !== null ? 1 : 0)} / {questionsList.length}
+                    </span>
+                  </div>
+                  <div className="bg-white p-2.5 rounded-xl border border-stone-200 shadow-2xs">
+                    <span className="text-[10px] font-bold text-emerald-700 uppercase block">Proficient</span>
+                    <span className="font-extrabold text-sm text-emerald-700">
+                      ✅ {roundSummary ? roundSummary.correctAnswers : ((evalScore || 0) >= 7.0 ? 1 : 0)}
+                    </span>
+                  </div>
+                  <div className="bg-white p-2.5 rounded-xl border border-stone-200 shadow-2xs">
+                    <span className="text-[10px] font-bold text-red-700 uppercase block">Developing</span>
+                    <span className="font-extrabold text-sm text-red-700">
+                      ❌ {roundSummary ? roundSummary.wrongAnswers : ((evalScore !== null && (evalScore || 0) < 7.0) ? 1 : 0)}
+                    </span>
+                  </div>
+                  <div className="bg-white p-2.5 rounded-xl border border-stone-200 shadow-2xs">
+                    <span className="text-[10px] font-bold text-stone-500 uppercase block">Accuracy</span>
+                    <span className="font-extrabold text-sm text-black">
+                      {roundSummary ? roundSummary.accuracyPercentage : ((evalScore || 0) * 10).toFixed(0)}%
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between pt-2 border-t border-stone-200">
+                  <span className="text-stone-600 font-bold">Overall Score:</span>
+                  <span className="font-extrabold text-base text-black">
+                    {evalScore !== null ? evalScore : (roundSummary ? roundSummary.overallScore.toFixed(1) : '0.0')} / 10
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex flex-col sm:flex-row items-center gap-3 w-full mt-2">
+                <button
+                  onClick={() => navigate('/dashboard')}
+                  className="w-full sm:w-1/2 bg-white border-2 border-black text-black font-radio font-bold text-xs py-3 rounded-xl hover:bg-stone-100 transition-all cursor-pointer text-center"
+                >
+                  Back to Dashboard
+                </button>
+
+                <button
+                  onClick={() => navigate('/full-report')}
+                  className="w-full sm:w-1/2 bg-black text-white font-radio font-bold text-xs py-3 rounded-xl hover:bg-stone-800 transition-all cursor-pointer flex items-center justify-center gap-1.5 shadow-md active:scale-95 text-center"
+                >
+                  <Award className="w-4 h-4 text-amber-400" />
+                  <span>View Full AI Report →</span>
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   )
 }

@@ -76,6 +76,7 @@ export default function Dashboard() {
   const [selectedDifficulty, setSelectedDifficulty] = useState('medium')
   const [selectedTechCount, setSelectedTechCount] = useState(5)
   const [selectedAptCount, setSelectedAptCount] = useState(10)
+  const [selectedBehCount, setSelectedBehCount] = useState(3)
   const [isSimulating, setIsSimulating] = useState(false)
   const [simStep, setSimStep] = useState('Running your round...')
 
@@ -186,7 +187,7 @@ export default function Dashboard() {
         throw new Error('No active user session. Please log in.')
       }
 
-      const qCount = selectedRoundType === 'technical' ? selectedTechCount : (selectedRoundType === 'aptitude' ? selectedAptCount : 3)
+      const qCount = selectedRoundType === 'technical' ? selectedTechCount : (selectedRoundType === 'aptitude' ? selectedAptCount : selectedBehCount)
 
       const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/round/start`, {
         method: 'POST',
@@ -504,11 +505,11 @@ export default function Dashboard() {
                   </div>
 
                   <div className="text-right">
-                    <span className="font-radio font-extrabold text-xl" style={{ color: getScoreColor((analytics.aptitude.averageScore / 50.0) * 10) }}>
+                    <span className="font-radio font-extrabold text-xl" style={{ color: getScoreColor(analytics.aptitude.averageScore) }}>
                       {analytics.aptitude.accuracy}%
                     </span>
                     <span className="text-xs text-stone-400 block font-medium">
-                      Avg {analytics.aptitude.averageScore} / 50
+                      Avg {analytics.aptitude.averageScore} / 10
                     </span>
                   </div>
                 </div>
@@ -519,7 +520,7 @@ export default function Dashboard() {
                     className="h-full rounded-full transition-all duration-700"
                     style={{
                       width: `${analytics.aptitude.accuracy}%`,
-                      backgroundColor: getScoreColor((analytics.aptitude.averageScore / 50.0) * 10)
+                      backgroundColor: getScoreColor(analytics.aptitude.averageScore)
                     }}
                   />
                 </div>
@@ -532,11 +533,11 @@ export default function Dashboard() {
                   </div>
                   <div className="bg-stone-50/70 p-2 rounded-lg">
                     <span className="text-[10px] text-stone-500 font-bold uppercase block">Avg Score</span>
-                    <span className="font-extrabold text-sm text-black">{analytics.aptitude.averageScore} <span className="text-[10px] text-stone-400">/50</span></span>
+                    <span className="font-extrabold text-sm text-black">{analytics.aptitude.averageScore} <span className="text-[10px] text-stone-400">/10</span></span>
                   </div>
                   <div className="bg-stone-50/70 p-2 rounded-lg">
                     <span className="text-[10px] text-stone-500 font-bold uppercase block">Best Score</span>
-                    <span className="font-extrabold text-sm text-amber-800">{analytics.aptitude.bestScore} <span className="text-[10px] text-stone-400">/50</span></span>
+                    <span className="font-extrabold text-sm text-amber-800">{analytics.aptitude.bestScore} <span className="text-[10px] text-stone-400">/10</span></span>
                   </div>
                   <div className="bg-stone-50/70 p-2 rounded-lg">
                     <span className="text-[10px] text-stone-500 font-bold uppercase block">Accuracy</span>
@@ -617,14 +618,14 @@ export default function Dashboard() {
                           {item.name}
                         </span>
                         <span className="text-[11px] text-stone-400">
-                          {item.formattedDate || item.daysAgo} · {item.questionsCount} questions
+                          {item.formattedDate || item.daysAgo} · {item.questionsCount} Qs {item.questionsAttempted !== undefined && item.questionsAttempted !== item.questionsCount ? `(${item.questionsAttempted}/${item.questionsCount} attempted)` : ''} {item.accuracyPercentage !== undefined ? `· ${item.accuracyPercentage}% accuracy` : ''}
                         </span>
                       </div>
                     </div>
 
                     <div className="text-right flex items-center gap-3">
                       <span className="font-radio font-extrabold text-sm text-stone-900">
-                        {item.score} <span className="text-stone-400 font-medium text-xs">/ {item.maxScore}</span>
+                        {item.roundType === 'aptitude' ? (item.correctCount !== undefined ? item.correctCount : Math.round((item.score / 10) * item.questionsCount)) : item.score} <span className="text-stone-400 font-medium text-xs">/ {item.roundType === 'aptitude' ? item.questionsCount : 10}</span>
                       </span>
                       <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
                         item.roundType === 'technical'
@@ -858,11 +859,35 @@ export default function Dashboard() {
                   )}
 
                   {selectedRoundType === 'behavioral' && (
-                    <div className="p-3 bg-blue-50/60 border border-blue-200 rounded-xl text-xs text-blue-900">
-                      <p className="font-bold mb-0.5">STAR Leadership Format</p>
-                      <p className="text-[11px] text-blue-800 leading-snug">
-                        Standard 3 situational interview questions with voice / text real-time evaluation.
-                      </p>
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <label className="text-xs font-bold text-stone-700 uppercase tracking-wider">
+                          2. Number of Questions
+                        </label>
+                        <span className="text-[10px] font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
+                          STAR Format
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-3 gap-1.5">
+                        {[
+                          { count: 3, label: '3 Qs (Core)' },
+                          { count: 5, label: '5 Qs (Standard)' },
+                          { count: 10, label: '10 Qs (Deep)' }
+                        ].map((item) => (
+                          <button
+                            key={item.count}
+                            type="button"
+                            onClick={() => setSelectedBehCount(item.count)}
+                            className={`py-2 px-2 rounded-xl border-2 text-center text-xs font-bold transition-all cursor-pointer ${
+                              selectedBehCount === item.count
+                                ? 'border-black bg-black text-white shadow-xs'
+                                : 'border-stone-200 hover:border-stone-300 text-stone-700 bg-white'
+                            }`}
+                          >
+                            <span>{item.label}</span>
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   )}
 
@@ -875,7 +900,7 @@ export default function Dashboard() {
                     <span>
                       Start {selectedRoundType.charAt(0).toUpperCase() + selectedRoundType.slice(1)} Round ({
                         selectedRoundType === 'technical' ? `${selectedTechCount} Problems · ${selectedDifficulty.toUpperCase()}` : (
-                          selectedRoundType === 'aptitude' ? `${selectedAptCount} Qs · ${selectedDifficulty.toUpperCase()}` : '3 Questions'
+                          selectedRoundType === 'aptitude' ? `${selectedAptCount} Qs · ${selectedDifficulty.toUpperCase()}` : `${selectedBehCount} Questions`
                         )
                       })
                     </span>

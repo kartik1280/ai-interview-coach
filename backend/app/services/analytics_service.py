@@ -126,20 +126,26 @@ def get_canonical_user_analytics(user_id: str, client: Client) -> Dict[str, Any]
         if r_type == "aptitude":
             correct_count = sum(1 for a in answers if is_aptitude_answer_correct(a))
             total_answered = len(answers)
-            score_out_of_50 = float(correct_count) if q_count >= 50 else (float(correct_count) / max(1, total_answered) * 50.0 if total_answered > 0 else 0.0)
-            score_normalized_10 = round((score_out_of_50 / 50.0) * 10.0, 1) if score_out_of_50 > 0 else 0.0
-            percentage = round((score_out_of_50 / 50.0) * 100.0) if score_out_of_50 > 0 else 0
+            wrong_count = max(0, total_answered - correct_count)
+            unattempted_count = max(0, q_count - total_answered)
+            accuracy_pct = round((correct_count / max(1, total_answered)) * 100.0, 1) if total_answered > 0 else 0.0
+            score_normalized_10 = round((correct_count / max(1, q_count)) * 10.0, 1) if q_count > 0 else 0.0
+            percentage = round(accuracy_pct)
 
             round_obj = {
                 "id": r_id,
                 "roundType": "aptitude",
-                "score": round(score_out_of_50, 1),
+                "score": score_normalized_10,
                 "scoreNormalized": score_normalized_10,
-                "maxScore": 50,
+                "maxScore": 10,
                 "percentage": percentage,
                 "correctCount": correct_count,
+                "wrongCount": wrong_count,
+                "unattemptedCount": unattempted_count,
                 "totalAnswered": total_answered,
-                "questionsCount": max(50, q_count),
+                "questionsAttempted": total_answered,
+                "questionsCount": max(1, q_count),
+                "accuracyPercentage": accuracy_pct,
                 "startedAt": started_at,
                 "answers": answers,
                 "questions": qs
@@ -149,10 +155,15 @@ def get_canonical_user_analytics(user_id: str, client: Client) -> Dict[str, Any]
                 "id": r_id,
                 "name": "Aptitude round",
                 "roundType": "aptitude",
-                "score": round(score_out_of_50, 1),
-                "maxScore": 50,
+                "score": score_normalized_10,
+                "maxScore": 10,
                 "percentage": percentage,
-                "questionsCount": max(50, q_count),
+                "questionsCount": max(1, q_count),
+                "questionsAttempted": total_answered,
+                "correctCount": correct_count,
+                "wrongCount": wrong_count,
+                "unattemptedCount": unattempted_count,
+                "accuracyPercentage": accuracy_pct,
                 "date": started_at.isoformat(),
                 "formattedDate": started_at.strftime("%b %d, %Y"),
                 "daysAgo": format_days_ago(started_at),
@@ -161,9 +172,14 @@ def get_canonical_user_analytics(user_id: str, client: Client) -> Dict[str, Any]
             })
 
         elif r_type == "behavioral":
+            total_answered = len(answers)
             scores = [float(a.get("score", 0)) for a in answers] if answers else [0.0]
-            avg_score = round(sum(scores) / max(1, len(scores)), 1)
+            avg_score = round(sum(scores) / max(1, total_answered), 1) if total_answered > 0 else 0.0
             percentage = round((avg_score / 10.0) * 100.0)
+            correct_count = sum(1 for a in answers if float(a.get("score", 0)) >= 7.0)
+            wrong_count = max(0, total_answered - correct_count)
+            unattempted_count = max(0, q_count - total_answered)
+            accuracy_pct = round((correct_count / max(1, total_answered)) * 100.0, 1) if total_answered > 0 else 0.0
 
             star_accum = {"situation": [], "task": [], "action": [], "result": []}
             for a in answers:
@@ -184,7 +200,13 @@ def get_canonical_user_analytics(user_id: str, client: Client) -> Dict[str, Any]
                 "maxScore": 10,
                 "percentage": percentage,
                 "star": star_avg,
-                "questionsCount": max(3, q_count),
+                "correctCount": correct_count,
+                "wrongCount": wrong_count,
+                "unattemptedCount": unattempted_count,
+                "totalAnswered": total_answered,
+                "questionsAttempted": total_answered,
+                "questionsCount": max(1, q_count),
+                "accuracyPercentage": accuracy_pct,
                 "startedAt": started_at,
                 "answers": answers,
                 "questions": qs
@@ -197,7 +219,12 @@ def get_canonical_user_analytics(user_id: str, client: Client) -> Dict[str, Any]
                 "score": avg_score,
                 "maxScore": 10,
                 "percentage": percentage,
-                "questionsCount": max(3, q_count),
+                "questionsCount": max(1, q_count),
+                "questionsAttempted": total_answered,
+                "correctCount": correct_count,
+                "wrongCount": wrong_count,
+                "unattemptedCount": unattempted_count,
+                "accuracyPercentage": accuracy_pct,
                 "date": started_at.isoformat(),
                 "formattedDate": started_at.strftime("%b %d, %Y"),
                 "daysAgo": format_days_ago(started_at),
@@ -206,9 +233,14 @@ def get_canonical_user_analytics(user_id: str, client: Client) -> Dict[str, Any]
             })
 
         else: # Technical
+            total_answered = len(answers)
             scores = [float(a.get("score", 0)) for a in answers] if answers else [0.0]
-            avg_score = round(sum(scores) / max(1, len(scores)), 1)
+            avg_score = round(sum(scores) / max(1, total_answered), 1) if total_answered > 0 else 0.0
             percentage = round((avg_score / 10.0) * 100.0)
+            correct_count = sum(1 for a in answers if float(a.get("score", 0)) >= 7.0)
+            wrong_count = max(0, total_answered - correct_count)
+            unattempted_count = max(0, q_count - total_answered)
+            accuracy_pct = round((correct_count / max(1, total_answered)) * 100.0, 1) if total_answered > 0 else 0.0
 
             round_obj = {
                 "id": r_id,
@@ -217,7 +249,13 @@ def get_canonical_user_analytics(user_id: str, client: Client) -> Dict[str, Any]
                 "scoreNormalized": avg_score,
                 "maxScore": 10,
                 "percentage": percentage,
+                "correctCount": correct_count,
+                "wrongCount": wrong_count,
+                "unattemptedCount": unattempted_count,
+                "totalAnswered": total_answered,
+                "questionsAttempted": total_answered,
                 "questionsCount": max(1, q_count),
+                "accuracyPercentage": accuracy_pct,
                 "startedAt": started_at,
                 "answers": answers,
                 "questions": qs
@@ -231,6 +269,11 @@ def get_canonical_user_analytics(user_id: str, client: Client) -> Dict[str, Any]
                 "maxScore": 10,
                 "percentage": percentage,
                 "questionsCount": max(1, q_count),
+                "questionsAttempted": total_answered,
+                "correctCount": correct_count,
+                "wrongCount": wrong_count,
+                "unattemptedCount": unattempted_count,
+                "accuracyPercentage": accuracy_pct,
                 "date": started_at.isoformat(),
                 "formattedDate": started_at.strftime("%b %d, %Y"),
                 "daysAgo": format_days_ago(started_at),
@@ -251,13 +294,16 @@ def get_canonical_user_analytics(user_id: str, client: Client) -> Dict[str, Any]
         tech_best = max(tech_scores)
         tech_latest = tech_rounds[0]["score"]
         tech_pct = round((tech_avg / 10.0) * 100.0)
+        total_tech_correct = sum(r["correctCount"] for r in tech_rounds)
+        total_tech_answered = sum(r["totalAnswered"] for r in tech_rounds)
+        tech_accuracy = round((total_tech_correct / max(1, total_tech_answered)) * 100.0, 1) if total_tech_answered > 0 else 0.0
         if tech_attempts >= 2:
             diff = round(tech_rounds[0]["score"] - tech_rounds[1]["score"], 1)
             tech_trend = f"{'+' if diff > 0 else ''}{diff}" if diff != 0 else "stable"
         else:
             tech_trend = "baseline"
     else:
-        tech_avg, tech_best, tech_latest, tech_pct, tech_trend = 0.0, 0.0, 0.0, 0, "no_attempts"
+        tech_avg, tech_best, tech_latest, tech_pct, tech_trend, tech_accuracy, total_tech_answered, total_tech_correct = 0.0, 0.0, 0.0, 0, "no_attempts", 0.0, 0, 0
 
     # 4. Behavioral Metrics
     beh_attempts = len(beh_rounds)
@@ -267,6 +313,9 @@ def get_canonical_user_analytics(user_id: str, client: Client) -> Dict[str, Any]
         beh_best = max(beh_scores)
         beh_latest = beh_rounds[0]["score"]
         beh_pct = round((beh_avg / 10.0) * 100.0)
+        total_beh_correct = sum(r["correctCount"] for r in beh_rounds)
+        total_beh_answered = sum(r["totalAnswered"] for r in beh_rounds)
+        beh_accuracy = round((total_beh_correct / max(1, total_beh_answered)) * 100.0, 1) if total_beh_answered > 0 else 0.0
 
         all_sit = [r["star"]["situation"] for r in beh_rounds]
         all_task = [r["star"]["task"] for r in beh_rounds]
@@ -279,7 +328,7 @@ def get_canonical_user_analytics(user_id: str, client: Client) -> Dict[str, Any]
             "result": round(sum(all_res) / len(all_res), 1),
         }
     else:
-        beh_avg, beh_best, beh_latest, beh_pct = 0.0, 0.0, 0.0, 0
+        beh_avg, beh_best, beh_latest, beh_pct, beh_accuracy, total_beh_answered, total_beh_correct = 0.0, 0.0, 0.0, 0, 0.0, 0, 0
         star_summary = {"situation": 0.0, "task": 0.0, "action": 0.0, "result": 0.0}
 
     # 5. Aptitude Metrics
@@ -291,7 +340,7 @@ def get_canonical_user_analytics(user_id: str, client: Client) -> Dict[str, Any]
         apt_latest = apt_rounds[0]["score"]
         total_apt_correct = sum(r["correctCount"] for r in apt_rounds)
         total_apt_answered = sum(r["totalAnswered"] for r in apt_rounds)
-        apt_accuracy = round((total_apt_correct / max(1, total_apt_answered)) * 100.0, 1) if total_apt_answered > 0 else round((apt_avg / 50.0) * 100.0, 1)
+        apt_accuracy = round((total_apt_correct / max(1, total_apt_answered)) * 100.0, 1) if total_apt_answered > 0 else 0.0
     else:
         apt_avg, apt_best, apt_latest, apt_accuracy, total_apt_answered, total_apt_correct = 0.0, 0.0, 0.0, 0.0, 0, 0
 
@@ -302,11 +351,14 @@ def get_canonical_user_analytics(user_id: str, client: Client) -> Dict[str, Any]
     if beh_attempts > 0:
         active_normalized_scores.append(beh_avg)
     if apt_attempts > 0:
-        active_normalized_scores.append(round((apt_avg / 50.0) * 10.0, 1))
+        active_normalized_scores.append(apt_avg)
 
     overall_readiness = round(sum(active_normalized_scores) / len(active_normalized_scores), 1) if active_normalized_scores else 0.0
     total_completed_rounds = tech_attempts + beh_attempts + apt_attempts
-    total_questions_answered = sum(len(r.get("answers", [])) for r in tech_rounds + beh_rounds + apt_rounds)
+    total_questions_answered = total_tech_answered + total_beh_answered + total_apt_answered
+    total_questions_correct = total_tech_correct + total_beh_correct + total_apt_correct
+    total_questions_wrong = max(0, total_questions_answered - total_questions_correct)
+    overall_accuracy = round((total_questions_correct / max(1, total_questions_answered)) * 100.0, 1) if total_questions_answered > 0 else 0.0
     streak = calculate_streak(history_dates)
 
     # 7. Identify Strongest & Weakest Category
@@ -316,7 +368,7 @@ def get_canonical_user_analytics(user_id: str, client: Client) -> Dict[str, Any]
     if beh_attempts > 0:
         categories_eval.append(("Behavioral", beh_avg, "STAR Communication"))
     if apt_attempts > 0:
-        categories_eval.append(("Aptitude", round((apt_avg / 50.0) * 10.0, 1), "Quantitative & Logic"))
+        categories_eval.append(("Aptitude", apt_avg, "Quantitative & Logic"))
 
     if categories_eval:
         categories_eval.sort(key=lambda x: x[1])
@@ -326,7 +378,7 @@ def get_canonical_user_analytics(user_id: str, client: Client) -> Dict[str, Any]
         weakest_area = "None yet"
         strongest_area = "None yet"
 
-    # 8. Clean History Items for Response (Up to 25 items so all completed practice sessions are visible)
+    # 8. Clean History Items for Response
     recent_history_clean = []
     full_history_clean = []
     for h in history_list:
@@ -360,7 +412,10 @@ def get_canonical_user_analytics(user_id: str, client: Client) -> Dict[str, Any]
             "averageScore": tech_avg,
             "bestScore": tech_best,
             "percentage": tech_pct,
-            "feedback": ["Good algorithmic depth", "Focus on boundary test cases"] if tech_attempts > 0 else ["No attempts completed yet."]
+            "questionsAnswered": total_tech_answered,
+            "questionsCorrect": total_tech_correct,
+            "accuracy": tech_accuracy,
+            "feedback": [f"Scored {tech_latest}/10", f"Accuracy {tech_accuracy}%"] if tech_attempts > 0 else ["No attempts completed yet."]
         },
         {
             "id": "behavioral",
@@ -371,19 +426,23 @@ def get_canonical_user_analytics(user_id: str, client: Client) -> Dict[str, Any]
             "averageScore": beh_avg,
             "bestScore": beh_best,
             "percentage": beh_pct,
-            "feedback": ["Structured STAR responses", "Continue practicing crisp result metrics"] if beh_attempts > 0 else ["No attempts completed yet."]
+            "questionsAnswered": total_beh_answered,
+            "questionsCorrect": total_beh_correct,
+            "accuracy": beh_accuracy,
+            "feedback": [f"Scored {beh_latest}/10", f"Accuracy {beh_accuracy}%"] if beh_attempts > 0 else ["No attempts completed yet."]
         },
         {
             "id": "aptitude",
             "name": "Aptitude round",
             "subtitle": "Career awareness and reasoning",
-            "score": round((apt_latest / 50.0) * 10.0, 1) if apt_attempts > 0 else 0.0,
-            "scoreOutOf50": apt_latest if apt_attempts > 0 else 0.0,
+            "score": apt_latest if apt_attempts > 0 else 0.0,
             "attempts": apt_attempts,
             "averageScore": apt_avg,
             "bestScore": apt_best,
             "accuracy": apt_accuracy,
-            "feedback": [f"Scored {apt_latest}/50", f"Accuracy {apt_accuracy}%"] if apt_attempts > 0 else ["No attempts completed yet."]
+            "questionsAnswered": total_apt_answered,
+            "questionsCorrect": total_apt_correct,
+            "feedback": [f"Scored {apt_latest}/10", f"Accuracy {apt_accuracy}%"] if apt_attempts > 0 else ["No attempts completed yet."]
         }
     ]
 
@@ -400,6 +459,9 @@ def get_canonical_user_analytics(user_id: str, client: Client) -> Dict[str, Any]
             "totalCompletedRounds": total_completed_rounds,
             "roundsDone": total_completed_rounds,
             "totalQuestionsAnswered": total_questions_answered,
+            "totalQuestionsCorrect": total_questions_correct,
+            "totalQuestionsWrong": total_questions_wrong,
+            "overallAccuracyPercentage": overall_accuracy,
             "streak": streak,
             "strongestArea": strongest_area,
             "weakestArea": weakest_area
@@ -422,6 +484,9 @@ def get_canonical_user_analytics(user_id: str, client: Client) -> Dict[str, Any]
             "bestScore": tech_best,
             "latestScore": tech_latest,
             "percentage": tech_pct,
+            "questionsAnswered": total_tech_answered,
+            "questionsCorrect": total_tech_correct,
+            "accuracy": tech_accuracy,
             "trend": tech_trend
         },
         "behavioral": {
@@ -430,6 +495,9 @@ def get_canonical_user_analytics(user_id: str, client: Client) -> Dict[str, Any]
             "bestScore": beh_best,
             "latestScore": beh_latest,
             "percentage": beh_pct,
+            "questionsAnswered": total_beh_answered,
+            "questionsCorrect": total_beh_correct,
+            "accuracy": beh_accuracy,
             "star": star_summary
         },
         "aptitude": {
@@ -486,7 +554,7 @@ def get_ai_improvement_analysis(
                     "problemSolving": {"score": 5.0, "status": "Pending Assessment", "critique": "Establish algorithmic baseline through Technical round."},
                     "systemArchitecture": {"score": 5.0, "status": "Pending Assessment", "critique": "Evaluate code structure and patterns."},
                     "starCommunication": {"score": 5.0, "status": "Pending Assessment", "critique": "Practice structured storytelling for behavioral questions."},
-                    "quantitativePacing": {"score": 5.0, "status": "Pending Assessment", "critique": "Complete 50-question timed aptitude assessment."}
+                    "quantitativePacing": {"score": 5.0, "status": "Pending Assessment", "critique": "Complete timed aptitude practice assessment."}
                 },
                 "preparationRoadmap": {
                     "phase1": "Establish Baseline: Take 1 Technical, 1 Behavioral, and 1 Aptitude assessment.",
@@ -497,24 +565,49 @@ def get_ai_improvement_analysis(
         }
 
     # Collect compact historical evidence
+    total_tech_ans = sum(r.get("totalAnswered", len(r.get("answers", []))) for r in tech_rounds)
+    total_tech_corr = sum(r.get("correctCount", 0) for r in tech_rounds)
+    total_beh_ans = sum(r.get("totalAnswered", len(r.get("answers", []))) for r in beh_rounds)
+    total_beh_corr = sum(r.get("correctCount", 0) for r in beh_rounds)
+    total_apt_ans = sum(r.get("totalAnswered", len(r.get("answers", []))) for r in apt_rounds)
+    total_apt_corr = sum(r.get("correctCount", 0) for r in apt_rounds)
+
+    total_all_answered = total_tech_ans + total_beh_ans + total_apt_ans
+    total_all_correct = total_tech_corr + total_beh_corr + total_apt_corr
+    total_all_wrong = max(0, total_all_answered - total_all_correct)
+    overall_accuracy_pct = round((total_all_correct / max(1, total_all_answered)) * 100.0, 1) if total_all_answered > 0 else 0.0
+
+    apt_accuracy = round((total_apt_corr / max(1, total_apt_ans)) * 100.0, 1) if total_apt_ans > 0 else 0.0
+
     evidence = {
         "targetPosition": target_position,
         "overallReadiness": overall_readiness,
+        "totalRoundsCompleted": total_rounds,
+        "totalQuestionsAttempted": total_all_answered,
+        "totalQuestionsCorrect": total_all_correct,
+        "totalQuestionsWrong": total_all_wrong,
+        "overallAccuracyPercentage": overall_accuracy_pct,
         "technical": {
             "attempts": len(tech_rounds),
             "averageScore": tech_avg,
+            "questionsAttempted": total_tech_ans,
+            "questionsCorrect": total_tech_corr,
             "sampleFeedbacks": [a.get("feedback", "")[:140] for r in tech_rounds[:3] for a in r.get("answers", [])[:2] if a.get("feedback")]
         },
         "behavioral": {
             "attempts": len(beh_rounds),
             "averageScore": beh_avg,
+            "questionsAttempted": total_beh_ans,
+            "questionsCorrect": total_beh_corr,
             "starScores": star_summary,
             "weakestStar": min(star_summary, key=star_summary.get) if star_summary else "none"
         },
         "aptitude": {
             "attempts": len(apt_rounds),
-            "averageScoreOutOf50": apt_avg,
-            "accuracy": round((apt_avg / 50.0) * 100.0, 1)
+            "averageScore": apt_avg,
+            "questionsAttempted": total_apt_ans,
+            "questionsCorrect": total_apt_corr,
+            "accuracy": round((total_apt_corr / max(1, total_apt_ans)) * 100.0, 1) if total_apt_ans > 0 else 0.0
         }
     }
 
@@ -604,13 +697,13 @@ def get_ai_improvement_analysis(
             "recommendation": f"Elaborate more deeply on the {weakest_star} phase of your stories with concrete metrics and actions.",
             "priority": 2
         })
-    if apt_rounds and apt_avg < 40:
+    if apt_rounds and apt_avg < 7.5:
         fallback_areas.append({
             "area": "Quantitative & Logical Pacing",
             "round": "aptitude",
             "severity": "medium",
-            "evidence": f"Aptitude score averaged {apt_avg}/50 ({round((apt_avg/50.0)*100)}% accuracy).",
-            "recommendation": "Practice speed calculations and time allocation per question to boost score toward 45+/50.",
+            "evidence": f"Aptitude score averaged {apt_avg}/10 ({round(apt_accuracy)}% accuracy).",
+            "recommendation": "Practice speed calculations and time allocation per question to boost score toward 9.0+/10.",
             "priority": 3
         })
 
@@ -632,12 +725,12 @@ def get_ai_improvement_analysis(
         "keyStrengths": [
             f"Demonstrated completion of {total_rounds} structured interview rounds.",
             f"Technical proficiency averaging {tech_avg}/10 with strong code evaluation fidelity." if tech_rounds else "Broad foundation across quantitative aptitude and behavioral exercises.",
-            f"Aptitude test accuracy of {round((apt_avg/50.0)*100)}% across {len(apt_rounds)} completed evaluations." if apt_rounds else "Consistent engagement across mock rounds."
+            f"Aptitude test accuracy of {round(apt_accuracy)}% across {len(apt_rounds)} completed evaluations." if apt_rounds else "Consistent engagement across mock rounds."
         ],
         "growthOpportunities": [
             f"Improve behavioral STAR framework articulation, currently averaging {beh_avg}/10." if beh_rounds else "Complete behavioral rounds to evaluate STAR communication skills.",
             f"Optimize technical algorithmic execution and edge-case testing." if tech_rounds else "Execute additional technical coding sessions to build strong algorithmic history.",
-            "Enhance quantitative time-budgeting during 50-question timed rounds."
+            "Enhance quantitative time-budgeting during timed aptitude practice rounds."
         ],
         "competencyMatrix": {
             "problemSolving": {
@@ -656,9 +749,9 @@ def get_ai_improvement_analysis(
                 "critique": f"Behavioral score of {beh_avg}/10. Emphasize quantifiable business outcomes in STAR Results."
             },
             "quantitativePacing": {
-                "score": round((apt_avg / 50.0) * 10.0, 1) if apt_rounds else 7.0,
-                "status": "Strong" if apt_avg >= 38 else "Adequate",
-                "critique": f"Aptitude score of {apt_avg}/50 ({round((apt_avg/50.0)*100)}% accuracy) on timed sets."
+                "score": apt_avg if apt_rounds else 7.0,
+                "status": "Strong" if apt_avg >= 7.5 else "Adequate",
+                "critique": f"Aptitude score of {apt_avg}/10 ({round(apt_accuracy)}% accuracy) on timed sets."
             }
         },
         "preparationRoadmap": {

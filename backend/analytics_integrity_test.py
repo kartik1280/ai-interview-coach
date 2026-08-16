@@ -149,8 +149,8 @@ class TestAnalyticsIntegrity(unittest.TestCase):
         analytics = get_canonical_user_analytics("u_apt", self.mock_client)
 
         self.assertEqual(analytics["aptitude"]["attempts"], 1)
-        self.assertEqual(analytics["aptitude"]["averageScore"], 45.0)
-        self.assertEqual(analytics["aptitude"]["bestScore"], 45.0)
+        self.assertEqual(analytics["aptitude"]["averageScore"], 9.0)
+        self.assertEqual(analytics["aptitude"]["bestScore"], 9.0)
         self.assertEqual(analytics["aptitude"]["accuracy"], 90.0)
         self.assertEqual(analytics["aptitude"]["questionsAnswered"], 50)
         self.assertEqual(analytics["aptitude"]["questionsCorrect"], 45)

@@ -14,6 +14,7 @@ from app.services.ai_service import (
     grade_aptitude_response, generate_aptitude_explanation,
     generate_technical_explanation
 )
+from app.services.analytics_service import is_aptitude_answer_correct
 
 router = APIRouter(prefix="/round", tags=["Round Engine"])
 
@@ -50,7 +51,14 @@ DEFAULT_APTITUDE_QUESTIONS = [
 DEFAULT_BEHAVIORAL_QUESTIONS = [
     "Tell me about a time you faced a difficult teammate. What did you do?",
     "Describe a situation where a project missed a deadline. How did you handle it?",
-    "Give an example of how you set goals and achieved them under high pressure."
+    "Give an example of how you set goals and achieved them under high pressure.",
+    "Tell me about a time you had to adapt to significant changes in requirements midway through a sprint.",
+    "Describe a mistake you made in production or architecture and what you learned from resolving it.",
+    "Share an example of how you advocated for technical quality or debt paydown against business pressure.",
+    "Tell me about a time you mentored or coached a junior peer or teammate.",
+    "Describe a situation where you had to persuade leadership or stakeholders on a controversial engineering decision.",
+    "Tell me about a high-ambiguity project you led from inception to delivery.",
+    "Describe a time you received constructive criticism and how you applied it to improve your work."
 ]
 
 TECHNICAL_TIME_LIMITS = {
@@ -95,8 +103,8 @@ def start_round(
         req_diff = (payload.difficulty or "all").lower()
 
         if payload.roundType == "technical":
-            # Determine question count: minimum 5, default 10 if not provided
-            target_count = max(5, min(20, payload.questionCount)) if payload.questionCount else 10
+            # Determine question count: minimum 5, default 5 if not provided
+            target_count = max(5, min(20, payload.questionCount)) if payload.questionCount else 5
 
             # Fetch from technical_questions table (role-specific filtering)
             db_q = client.table("technical_questions").select("*").eq("position", position).execute()
@@ -152,8 +160,8 @@ def start_round(
                 })
 
         elif payload.roundType == "aptitude":
-            # Determine question count: minimum 10, default 50 if not provided
-            target_count = max(10, min(50, payload.questionCount)) if payload.questionCount else 50
+            # Determine question count: minimum 10, default 10 if not provided
+            target_count = max(10, min(50, payload.questionCount)) if payload.questionCount else 10
 
             db_q = client.table("aptitude_questions").select("*").execute()
             q_list = db_q.data if db_q.data else []
@@ -175,7 +183,8 @@ def start_round(
 
             for idx, q in enumerate(selected_qs):
                 options_str = f"A) {q.get('option_a', '')} | B) {q.get('option_b', '')} | C) {q.get('option_c', '')} | D) {q.get('option_d', '')}"
-                q_text = f"{q.get('question', '')} Options: {options_str}"
+                corr_opt = (q.get("correct_option") or "C").strip().upper()
+                q_text = f"{q.get('question', '')} Options: {options_str} [CORRECT: {corr_opt}]"
                 questions_to_insert.append({
                     "round_id": round_id,
                     "question_text": q_text,
@@ -185,7 +194,16 @@ def start_round(
                 })
 
         elif payload.roundType == "behavioral":
-            for q_text in DEFAULT_BEHAVIORAL_QUESTIONS:
+            # Determine question count: minimum 3, default 3 if not provided
+            target_count = max(3, min(10, payload.questionCount)) if payload.questionCount else 3
+            selected_b_qs = []
+            while len(selected_b_qs) < target_count:
+                for q_text in DEFAULT_BEHAVIORAL_QUESTIONS:
+                    selected_b_qs.append(q_text)
+                    if len(selected_b_qs) >= target_count:
+                        break
+
+            for q_text in selected_b_qs:
                 questions_to_insert.append({
                     "round_id": round_id,
                     "question_text": q_text,
@@ -497,7 +515,7 @@ def finish_round(
 ):
     """
     Finalizes a practice round, marking status='completed' in Supabase.
-    Computes overall score from submitted answers.
+    Computes comprehensive attempt metrics (attempted, correct, wrong, unattempted, accuracy, overall score).
     """
     try:
         # Verify the round exists and belongs to the user
@@ -505,20 +523,37 @@ def finish_round(
         if not round_res.data or len(round_res.data) == 0:
             raise HTTPException(status_code=404, detail="Round not found or access denied")
 
+        round_record = round_res.data[0]
+        round_type = (round_record.get("round_type") or "technical").lower()
+
         # Fetch all questions for this round
-        all_qs_res = client.table("questions").select("id").eq("round_id", id).execute()
-        all_q_ids = [q["id"] for q in (all_qs_res.data or [])]
+        all_qs_res = client.table("questions").select("id, question_text").eq("round_id", id).execute()
+        all_qs = all_qs_res.data or []
+        all_q_ids = [q["id"] for q in all_qs]
+        total_questions = len(all_q_ids)
 
         # Fetch answered questions
-        ans_count = 0
-        overall_score = 0.0
+        answers = []
         if all_q_ids:
-            ans_res = client.table("answers").select("score").in_("question_id", all_q_ids).execute()
+            ans_res = client.table("answers").select("*").in_("question_id", all_q_ids).execute()
             answers = ans_res.data or []
-            ans_count = len(answers)
-            if ans_count > 0:
-                scores = [float(a.get("score") or 0) for a in answers]
-                overall_score = round(sum(scores) / ans_count, 1)
+
+        questions_attempted = len(answers)
+        scores = [float(a.get("score") or 0.0) for a in answers]
+        overall_score = round(sum(scores) / max(1, questions_attempted), 1) if questions_attempted > 0 else 0.0
+
+        if round_type == "aptitude":
+            correct_count = sum(1 for a in answers if is_aptitude_answer_correct(a))
+            score_val = float(correct_count)
+            max_score_val = total_questions
+        else:
+            correct_count = sum(1 for a in answers if float(a.get("score") or 0.0) >= 7.0)
+            score_val = overall_score
+            max_score_val = 10
+
+        wrong_count = max(0, questions_attempted - correct_count)
+        unattempted_count = max(0, total_questions - questions_attempted)
+        accuracy_pct = round((correct_count / max(1, questions_attempted)) * 100.0, 1) if questions_attempted > 0 else 0.0
 
         # Mark round status as completed
         client.table("rounds").update({
@@ -528,8 +563,16 @@ def finish_round(
         return {
             "status": "completed",
             "roundId": id,
-            "questionsAnswered": ans_count,
-            "overallScore": overall_score
+            "roundType": round_type,
+            "totalQuestions": total_questions,
+            "questionsAttempted": questions_attempted,
+            "correctAnswers": correct_count,
+            "wrongAnswers": wrong_count,
+            "unattempted": unattempted_count,
+            "accuracyPercentage": accuracy_pct,
+            "overallScore": overall_score,
+            "score": score_val,
+            "maxScore": max_score_val
         }
     except HTTPException:
         raise
