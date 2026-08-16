@@ -47,23 +47,31 @@ def api_request(method, url, data=None, token=None):
             body = {"detail": str(e)}
         return e.code, body
 
-def supabase_login(email, password):
-    """Login via Supabase Auth REST API to get a JWT token."""
+def supabase_login(email, password, retries=3):
+    """Login via Supabase Auth REST API to get a JWT token with network retry."""
+    import time
     url = f"{SUPABASE_URL}/auth/v1/token?grant_type=password"
     headers = {
         "Content-Type": "application/json",
         "apikey": SUPABASE_ANON_KEY
     }
     data = json.dumps({"email": email, "password": password}).encode("utf-8")
-    req = urllib.request.Request(url, data=data, headers=headers, method="POST")
     
-    try:
-        with urllib.request.urlopen(req) as response:
-            result = json.loads(response.read().decode())
-            return result.get("access_token"), result.get("user", {}).get("id")
-    except urllib.error.HTTPError as e:
-        print(f"Login failed: {e.read().decode()}")
-        return None, None
+    for attempt in range(retries):
+        try:
+            req = urllib.request.Request(url, data=data, headers=headers, method="POST")
+            with urllib.request.urlopen(req, timeout=10) as response:
+                result = json.loads(response.read().decode())
+                return result.get("access_token"), result.get("user", {}).get("id")
+        except urllib.error.HTTPError as e:
+            print(f"Login failed: {e.read().decode()}")
+            return None, None
+        except Exception as e:
+            if attempt < retries - 1:
+                time.sleep(1.5)
+                continue
+            print(f"Login network error after {retries} attempts: {e}")
+            return None, None
 
 # =============================================
 # Phase 1: Server Health

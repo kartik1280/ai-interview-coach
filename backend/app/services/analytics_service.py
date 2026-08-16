@@ -326,22 +326,27 @@ def get_canonical_user_analytics(user_id: str, client: Client) -> Dict[str, Any]
         weakest_area = "None yet"
         strongest_area = "None yet"
 
-    # 8. Clean Recent History Items for Response
+    # 8. Clean History Items for Response (Up to 25 items so all completed practice sessions are visible)
     recent_history_clean = []
-    for h in history_list[:8]:
+    full_history_clean = []
+    for h in history_list:
         clean_item = dict(h)
         clean_item.pop("dt", None)
-        recent_history_clean.append(clean_item)
+        full_history_clean.append(clean_item)
+        if len(recent_history_clean) < 25:
+            recent_history_clean.append(clean_item)
 
-    # 9. AI Areas to Improve Pipeline
+    # 9. AI Areas to Improve & Detailed Report Pipeline
     ai_improvement_data = get_ai_improvement_analysis(
         user_id=user_id,
+        target_position=target_position,
         tech_rounds=tech_rounds,
         beh_rounds=beh_rounds,
         apt_rounds=apt_rounds,
         tech_avg=tech_avg,
         beh_avg=beh_avg,
         apt_avg=apt_avg,
+        overall_readiness=overall_readiness,
         star_summary=star_summary
     )
 
@@ -408,6 +413,7 @@ def get_canonical_user_analytics(user_id: str, client: Client) -> Dict[str, Any]
         "streak": streak,
         "rounds": rounds_cards,
         "recentHistory": recent_history_clean,
+        "fullHistory": full_history_clean,
         "areasToImprove": areas_str,
         "areasToImproveList": ai_improvement_data.get("areas", []),
         "technical": {
@@ -436,17 +442,20 @@ def get_canonical_user_analytics(user_id: str, client: Client) -> Dict[str, Any]
             "questionsCorrect": total_apt_correct
         },
         "aiAnalysisAvailable": ai_improvement_data.get("aiAnalysisAvailable", False),
-        "aiPlan": ai_improvement_data.get("plan", {})
+        "aiPlan": ai_improvement_data.get("plan", {}),
+        "aiReport": ai_improvement_data.get("report", {})
     }
 
 def get_ai_improvement_analysis(
     user_id: str,
+    target_position: str,
     tech_rounds: List[Dict[str, Any]],
     beh_rounds: List[Dict[str, Any]],
     apt_rounds: List[Dict[str, Any]],
     tech_avg: float,
     beh_avg: float,
     apt_avg: float,
+    overall_readiness: float,
     star_summary: Dict[str, float]
 ) -> Dict[str, Any]:
     total_rounds = len(tech_rounds) + len(beh_rounds) + len(apt_rounds)
@@ -467,15 +476,34 @@ def get_ai_improvement_analysis(
                 "whyItMatters": "Establishes your baseline across algorithms, communication, and quantitative problem solving.",
                 "whatToPractice": "Take 1 Technical round, 1 Behavioral round, and 1 Aptitude round.",
                 "suggestedTarget": "7.5+ / 10 readiness across all categories."
+            },
+            "report": {
+                "executiveSummary": f"Candidate is preparing for {target_position}. No completed rounds logged yet. Baseline diagnostic recommended.",
+                "readinessLevel": "Needs Initial Assessment",
+                "keyStrengths": ["Ready to begin targeted training across Technical, Behavioral, and Aptitude domains."],
+                "growthOpportunities": ["Complete first diagnostic round in each category to unlock personalized analytics."],
+                "competencyMatrix": {
+                    "problemSolving": {"score": 5.0, "status": "Pending Assessment", "critique": "Establish algorithmic baseline through Technical round."},
+                    "systemArchitecture": {"score": 5.0, "status": "Pending Assessment", "critique": "Evaluate code structure and patterns."},
+                    "starCommunication": {"score": 5.0, "status": "Pending Assessment", "critique": "Practice structured storytelling for behavioral questions."},
+                    "quantitativePacing": {"score": 5.0, "status": "Pending Assessment", "critique": "Complete 50-question timed aptitude assessment."}
+                },
+                "preparationRoadmap": {
+                    "phase1": "Establish Baseline: Take 1 Technical, 1 Behavioral, and 1 Aptitude assessment.",
+                    "phase2": "Target Weaknesses: Focus on lowest-scoring domain with daily practice drills.",
+                    "phase3": "Full Simulation: Run end-to-end interview simulations under strict time constraints."
+                }
             }
         }
 
     # Collect compact historical evidence
     evidence = {
+        "targetPosition": target_position,
+        "overallReadiness": overall_readiness,
         "technical": {
             "attempts": len(tech_rounds),
             "averageScore": tech_avg,
-            "sampleFeedbacks": [a.get("feedback", "")[:120] for r in tech_rounds[:3] for a in r.get("answers", [])[:2] if a.get("feedback")]
+            "sampleFeedbacks": [a.get("feedback", "")[:140] for r in tech_rounds[:3] for a in r.get("answers", [])[:2] if a.get("feedback")]
         },
         "behavioral": {
             "attempts": len(beh_rounds),
@@ -498,10 +526,10 @@ def get_ai_improvement_analysis(
         return _AI_RECOMMENDATIONS_CACHE[cache_key]
 
     system_prompt = (
-        "You are an expert AI Career Coach evaluating candidate practice history.\n"
-        "Analyze the provided historical practice metrics and generate an actionable, evidence-based improvement plan.\n"
+        "You are a Chief Technology Interview Examiner and Executive Career Coach evaluating a candidate's complete practice history.\n"
+        "Generate an exhaustive, highly structured, evidence-based performance dossier in JSON.\n"
         "RULES:\n"
-        "1. Base recommendations STRICTLY on the supplied performance data. Do NOT invent weaknesses not present in the data.\n"
+        "1. Base all feedback strictly on the provided quantitative metrics.\n"
         "2. Output ONLY a valid JSON object matching this schema:\n"
         "{\n"
         "  \"areas\": [\n"
@@ -520,11 +548,28 @@ def get_ai_improvement_analysis(
         "    \"whyItMatters\": \"string\",\n"
         "    \"whatToPractice\": \"string\",\n"
         "    \"suggestedTarget\": \"string\"\n"
+        "  },\n"
+        "  \"report\": {\n"
+        "    \"executiveSummary\": \"Detailed 2-3 sentence assessment of candidate readiness for target position\",\n"
+        "    \"readinessLevel\": \"Production Ready\" | \"Strong Competitor\" | \"Proficient with Gaps\" | \"Developing\",\n"
+        "    \"keyStrengths\": [\"string\", \"string\", \"string\"],\n"
+        "    \"growthOpportunities\": [\"string\", \"string\", \"string\"],\n"
+        "    \"competencyMatrix\": {\n"
+        "      \"problemSolving\": {\"score\": 8.5, \"status\": \"Strong\" | \"Adequate\" | \"Needs Focus\", \"critique\": \"string\"},\n"
+        "      \"systemArchitecture\": {\"score\": 7.0, \"status\": \"Strong\" | \"Adequate\" | \"Needs Focus\", \"critique\": \"string\"},\n"
+        "      \"starCommunication\": {\"score\": 6.5, \"status\": \"Strong\" | \"Adequate\" | \"Needs Focus\", \"critique\": \"string\"},\n"
+        "      \"quantitativePacing\": {\"score\": 8.0, \"status\": \"Strong\" | \"Adequate\" | \"Needs Focus\", \"critique\": \"string\"}\n"
+        "    },\n"
+        "    \"preparationRoadmap\": {\n"
+        "      \"phase1\": \"Immediate 7-Day sprint focus\",\n"
+        "      \"phase2\": \"Day 8-20 deep mock practice\",\n"
+        "      \"phase3\": \"Day 21-30 live simulation & final polish\"\n"
+        "    }\n"
         "  }\n"
         "}"
     )
 
-    user_prompt = f"HISTORICAL PRACTICE EVIDENCE:\n{evidence}\n\nAnalyze performance and generate structured JSON improvement plan."
+    user_prompt = f"HISTORICAL PRACTICE EVIDENCE:\n{json.dumps(evidence, indent=2)}\n\nAnalyze performance and generate complete structured JSON dossier."
 
     parsed = call_gemini_json(user_prompt=user_prompt, system_prompt=system_prompt)
 
@@ -532,7 +577,8 @@ def get_ai_improvement_analysis(
         result = {
             "aiAnalysisAvailable": True,
             "areas": parsed.get("areas", []),
-            "plan": parsed.get("plan", {})
+            "plan": parsed.get("plan", {}),
+            "report": parsed.get("report", {})
         }
         _AI_RECOMMENDATIONS_CACHE[cache_key] = result
         return result
@@ -578,6 +624,50 @@ def get_ai_improvement_analysis(
             "priority": 1
         })
 
+    # Fallback report structure
+    readiness_level = "Production Ready" if overall_readiness >= 8.0 else ("Strong Competitor" if overall_readiness >= 6.5 else "Developing")
+    fallback_report = {
+        "executiveSummary": f"Candidate demonstrates an overall readiness score of {overall_readiness}/10 for {target_position}. Performance across completed rounds reflects active engagement with clear opportunities to elevate score benchmarks.",
+        "readinessLevel": readiness_level,
+        "keyStrengths": [
+            f"Demonstrated completion of {total_rounds} structured interview rounds.",
+            f"Technical proficiency averaging {tech_avg}/10 with strong code evaluation fidelity." if tech_rounds else "Broad foundation across quantitative aptitude and behavioral exercises.",
+            f"Aptitude test accuracy of {round((apt_avg/50.0)*100)}% across {len(apt_rounds)} completed evaluations." if apt_rounds else "Consistent engagement across mock rounds."
+        ],
+        "growthOpportunities": [
+            f"Improve behavioral STAR framework articulation, currently averaging {beh_avg}/10." if beh_rounds else "Complete behavioral rounds to evaluate STAR communication skills.",
+            f"Optimize technical algorithmic execution and edge-case testing." if tech_rounds else "Execute additional technical coding sessions to build strong algorithmic history.",
+            "Enhance quantitative time-budgeting during 50-question timed rounds."
+        ],
+        "competencyMatrix": {
+            "problemSolving": {
+                "score": tech_avg if tech_rounds else 7.0,
+                "status": "Strong" if tech_avg >= 7.5 else "Adequate",
+                "critique": f"Technical problem solving average of {tech_avg}/10 with solid logic execution."
+            },
+            "systemArchitecture": {
+                "score": round(max(5.0, tech_avg * 0.9), 1) if tech_rounds else 6.5,
+                "status": "Adequate",
+                "critique": "Focus on modular design, clean helper methods, and memory footprint management."
+            },
+            "starCommunication": {
+                "score": beh_avg if beh_rounds else 6.0,
+                "status": "Strong" if beh_avg >= 7.5 else ("Adequate" if beh_avg >= 5.0 else "Needs Focus"),
+                "critique": f"Behavioral score of {beh_avg}/10. Emphasize quantifiable business outcomes in STAR Results."
+            },
+            "quantitativePacing": {
+                "score": round((apt_avg / 50.0) * 10.0, 1) if apt_rounds else 7.0,
+                "status": "Strong" if apt_avg >= 38 else "Adequate",
+                "critique": f"Aptitude score of {apt_avg}/50 ({round((apt_avg/50.0)*100)}% accuracy) on timed sets."
+            }
+        },
+        "preparationRoadmap": {
+            "phase1": "Target Weakest Domain: Dedicate 45 minutes daily to your lowest-scoring category.",
+            "phase2": "Deep Simulation: Conduct 2 full mock sessions weekly under standard countdown timer constraints.",
+            "phase3": "Final Calibration: Review feedback summaries and refine STAR stories with exact metrics."
+        }
+    }
+
     return {
         "aiAnalysisAvailable": False,
         "areas": fallback_areas,
@@ -587,5 +677,6 @@ def get_ai_improvement_analysis(
             "whyItMatters": "Directly impacts final interview screening readiness.",
             "whatToPractice": fallback_areas[0]["recommendation"],
             "suggestedTarget": "8.5+ / 10 score"
-        }
+        },
+        "report": fallback_report
     }

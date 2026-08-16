@@ -13,7 +13,8 @@ const BEHAVIORAL_QUESTIONS = [
 ]
 
 const STATUS_CONFIG = {
-  connecting: { label: 'Connecting...', color: 'text-amber-600', pulse: true },
+  idle: { label: 'Ready for response', color: 'text-stone-500', pulse: false },
+  connecting: { label: 'Connecting to AI coach...', color: 'text-amber-600', pulse: true },
   listening: { label: 'Listening to you...', color: 'text-emerald-700', pulse: true },
   ai_thinking: { label: 'AI is thinking...', color: 'text-blue-600', pulse: true },
   ai_speaking: { label: 'AI is speaking...', color: 'text-violet-600', pulse: true },
@@ -40,7 +41,7 @@ export default function BehavioralRound() {
   const [userAnswer, setUserAnswer] = useState('')
   const [isManualRecording, setIsManualRecording] = useState(false)
 
-  // Evaluation States (null/empty initially — NO fake/default evaluation data)
+  // Evaluation States (null/empty initially — strictly dynamic from backend)
   const [showFeedback, setShowFeedback] = useState(false)
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [evalScore, setEvalScore] = useState(null)
@@ -48,7 +49,7 @@ export default function BehavioralRound() {
   const [starBreakdown, setStarBreakdown] = useState(null)
   const [evalError, setEvalError] = useState(null)
 
-  // Real-time Voice Agent Hook (develop feature)
+  // Real-time Voice Agent Hook
   const resumeText = "Candidate pursuing software role with experience in system design and teamwork."
   const candidateName = "Candidate"
   const {
@@ -162,12 +163,15 @@ export default function BehavioralRound() {
       case 'listening': return <Mic className="w-10 h-10 text-blue-700" />
       case 'ai_thinking': return <Brain className="w-10 h-10 text-amber-700" />
       case 'error': return <AlertCircle className="w-10 h-10 text-red-600" />
-      default: return null
+      default: return <Volume2 className="w-10 h-10 text-stone-600" />
     }
   }, [status])
 
   return (
     <div className="min-h-screen bg-[#FAF7ED] text-black font-radio selection:bg-parker-red selection:text-white flex flex-col justify-between">
+      {/* Hidden Audio Tag for DOM Mounting */}
+      <audio id="ai-audio-player" hidden />
+
       {/* Top Header Navbar */}
       <header className="px-6 py-4 border-b border-stone-200 bg-[#FAF7ED] flex items-center justify-between">
         <div className="flex items-center gap-4">
@@ -396,7 +400,7 @@ export default function BehavioralRound() {
 
               {/* 4 STAR Sub-scores Card Grid (rendered if backend returns starBreakdown) */}
               {starBreakdown && (
-                <div className="grid grid-cols-4 gap-2 mb-4 text-center">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4 text-center">
                   <div className="bg-stone-50 border border-stone-200 p-2 rounded-xl">
                     <span className="text-[10px] font-bold text-stone-500 block">SITUATION</span>
                     <span className="font-bold text-sm text-[#2F8F6E]">{starBreakdown.situation}</span>
@@ -417,7 +421,7 @@ export default function BehavioralRound() {
               )}
 
               {/* Detailed Evaluation Feedback */}
-              <p className="text-xs text-stone-700 leading-relaxed">
+              <p className="text-xs text-stone-700 leading-relaxed font-radio">
                 {evalFeedback}
               </p>
             </motion.div>

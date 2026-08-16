@@ -118,10 +118,14 @@ class DashboardResponse(BaseModel):
     areasToImproveList: Optional[List[AreaToImprove]] = None
     aiAnalysisAvailable: Optional[bool] = False
     aiPlan: Optional[Dict[str, Any]] = None
+    aiReport: Optional[Dict[str, Any]] = None
+    fullHistory: Optional[List[Dict[str, Any]]] = None
 
 # Round Lifecycle
 class RoundStartRequest(BaseModel):
     roundType: str = Field(..., description="round type: technical, behavioral, aptitude")
+    difficulty: Optional[str] = Field("medium", description="difficulty: easy, medium, hard, all")
+    questionCount: Optional[int] = Field(None, description="number of questions to attempt (min 5 for technical, min 10 for aptitude)")
 
 class QuestionResponse(BaseModel):
     id: str
@@ -158,6 +162,13 @@ class AptitudeExplainRequest(BaseModel):
     selectedOption: Optional[str] = None
     questionId: Optional[str] = None
 
+class TechnicalExplainRequest(BaseModel):
+    questionText: Optional[str] = None
+    starterCode: Optional[str] = None
+    candidateCode: Optional[str] = None
+    language: Optional[str] = "javascript"
+    questionId: Optional[str] = None
+
 class AptitudeExplainResponse(BaseModel):
     correct: bool
     correctOption: Optional[str] = None
@@ -184,3 +195,5 @@ class ReportResponse(BaseModel):
     areasToImproveList: Optional[List[AreaToImprove]] = None
     aiAnalysisAvailable: Optional[bool] = False
     aiPlan: Optional[Dict[str, Any]] = None
+    aiReport: Optional[Dict[str, Any]] = None
+    fullHistory: Optional[List[Dict[str, Any]]] = None

@@ -63,7 +63,7 @@ export default function AptitudeRound() {
     // Parse Options: A) ... | B) ... | C) ... | D) ...
     let questionTitle = bq.questionText || ''
     let options = ['A) Option A', 'B) Option B', 'C) Option C', 'D) Option D']
-    
+
     if (questionTitle.includes(' Options: ')) {
       const parts = questionTitle.split(' Options: ')
       questionTitle = parts[0]
@@ -72,7 +72,7 @@ export default function AptitudeRound() {
         options = optStr.split(' | ')
       }
     }
-    
+
     return {
       id: bq.id,
       questionId: bq.id,
@@ -201,8 +201,9 @@ export default function AptitudeRound() {
     }
   }
 
-  // 15 Minutes Total Timer State (900 seconds)
-  const [timeLeft, setTimeLeft] = useState(900)
+  // Dynamic Total Timer State based on Question Count
+  const initialTimeSeconds = roundState.totalTimeLimitSeconds || Math.max(300, finalQuestionsList.length * 20)
+  const [timeLeft, setTimeLeft] = useState(initialTimeSeconds)
   const [isTimerActive, setIsTimerActive] = useState(true)
   const [showTimeUpModal, setShowTimeUpModal] = useState(false)
 

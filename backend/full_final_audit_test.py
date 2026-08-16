@@ -51,28 +51,43 @@ def api_request(method, url, data=None, token=None):
             body = {"detail": str(e)}
         return e.code, body
 
-def supabase_login(email, password):
+def supabase_login(email, password, retries=3):
+    import time
     url = f"{SUPABASE_URL}/auth/v1/token?grant_type=password"
     headers = {"Content-Type": "application/json", "apikey": SUPABASE_ANON_KEY}
     data = json.dumps({"email": email, "password": password}).encode("utf-8")
-    req = urllib.request.Request(url, data=data, headers=headers, method="POST")
-    try:
-        with urllib.request.urlopen(req) as response:
-            res = json.loads(response.read().decode())
-            return res.get("access_token"), res.get("user", {}).get("id")
-    except urllib.error.HTTPError as e:
-        return None, None
+    for attempt in range(retries):
+        try:
+            req = urllib.request.Request(url, data=data, headers=headers, method="POST")
+            with urllib.request.urlopen(req, timeout=10) as response:
+                res = json.loads(response.read().decode())
+                return res.get("access_token"), res.get("user", {}).get("id")
+        except urllib.error.HTTPError as e:
+            return None, None
+        except Exception:
+            if attempt < retries - 1:
+                time.sleep(1.5)
+                continue
+            return None, None
 
-def supabase_signup(email, password):
+def supabase_signup(email, password, retries=3):
+    import time
     url = f"{SUPABASE_URL}/auth/v1/signup"
     headers = {"Content-Type": "application/json", "apikey": SUPABASE_ANON_KEY}
     data = json.dumps({"email": email, "password": password}).encode("utf-8")
-    req = urllib.request.Request(url, data=data, headers=headers, method="POST")
-    try:
-        with urllib.request.urlopen(req) as response:
-            res = json.loads(response.read().decode())
-            return res.get("access_token") or True
-    except urllib.error.HTTPError:
+    for attempt in range(retries):
+        try:
+            req = urllib.request.Request(url, data=data, headers=headers, method="POST")
+            with urllib.request.urlopen(req, timeout=10) as response:
+                res = json.loads(response.read().decode())
+                return res.get("access_token") or True
+        except urllib.error.HTTPError:
+            return True
+        except Exception:
+            if attempt < retries - 1:
+                time.sleep(1.5)
+                continue
+            return True
         return None
 
 print("\n" + "="*70)
