@@ -1,194 +1,195 @@
-# AI Interview Coach
+# AI Interview Coach 🚀
 
-> Practice interviews that actually feel like interviews — personalized to your resume, your target role, and your industry.
-
----
-
-## Overview
-
-AI Interview Coach is a web app that helps job candidates prepare for real interviews through three types of mock practice rounds — **Technical**, **Behavioral**, and **Aptitude** — followed by honest, AI-generated feedback and a growing track record over time.
-
-Instead of a static bank of generic interview questions, the app builds a **personalized interview journey**:
-- Behavioral questions are generated live by AI based on the candidate's actual uploaded resume
-- Technical and Aptitude rounds pull from a curated question bank matched to the candidate's target role and industry
-- Every completed round feeds into a readiness score, a practice streak, and a running list of what to improve next
-
-Built as a hackathon MVP with a focus on shipping a complete, working user journey end to end rather than a large feature set.
+> An intelligent, end-to-end AI interview preparation platform personalized to your resume, target role, and industry.
 
 ---
 
-## Tech Stack
+## 🌟 Overview
 
-**Frontend**
-- React + TypeScript + Vite
-- TailwindCSS + shadcn/ui
-- Framer Motion (animation)
-- React Router (navigation)
-- React Hook Form + Zod (forms & validation)
-- TanStack Query (data fetching once backend is live)
-- Recharts (charts on the full report page)
+**AI Interview Coach** is a state-of-the-art web application designed to help job candidates master technical coding, behavioral STAR responses, and quantitative aptitude under real interview conditions.
 
-**Backend**
-- FastAPI (Python)
-- Supabase — Postgres database, Auth, and File Storage
-- OpenAI API — resume parsing, Behavioral question generation, and answer scoring/feedback
-- PyMuPDF — extracting text from uploaded resume PDFs
-
-**Deployment**
-- Frontend → Vercel
-- Backend → Railway / Render
-- Database, Auth, Storage → Supabase (hosted)
+Unlike static platforms with generic question banks, **AI Interview Coach** constructs a dynamic, personalized interview journey:
+- **Behavioral Rounds**: Dynamically generated live by Google Gemini based on the candidate's uploaded resume, target position, and industry.
+- **Technical Rounds**: Role-tailored Data Structures & Algorithms coding challenges evaluated by Gemini AI across 4 programming languages with real-time Big-O complexity analysis.
+- **Aptitude Rounds**: Shuffled quantitative math, pattern deduction, and logical reasoning multiple-choice drills with instant AI solution explanations.
+- **Executive Performance Dossier**: Comprehensive analytics tracking readiness scores, practice streaks, accuracy metrics, STAR component breakdown, and a personalized 30-Day AI Preparation Roadmap.
 
 ---
 
-## Setup
+## 🛠️ Tech Stack
+
+### **Frontend**
+- **Core Framework**: React (Vite) + JavaScript / JSX
+- **Styling**: Vanilla CSS + TailwindCSS + Custom Neobrutalist / Retro Design System
+- **Icons & Micro-animations**: Lucide React + Framer Motion
+- **Code Editor**: `@monaco-editor/react` (Monaco Code Editor supporting JavaScript, Python, Java, and C++)
+- **Data Visualization**: Recharts (radar charts, category breakdown, progress metrics)
+- **Authentication & State**: Supabase Auth JS SDK + JWT Bearer token state management
+
+### **Backend**
+- **API Framework**: FastAPI (Python 3.10+) + Uvicorn
+- **AI Engine**: Google Gemini API (`google-genai` SDK using `gemini-3.7-flash` / `gemini-flash-latest`)
+- **Database & Storage**: Supabase Postgres Database + Supabase Storage (for resume PDFs)
+- **Document Processing**: PyMuPDF (`fitz`) for PDF text extraction & structured parsing
+
+---
+
+## 🚀 Key Features
+
+### 💻 1. Technical Coding Round
+- **Configurable Practice Length**: Choose **5, 10, 15, or 20 questions**.
+- **Difficulty-Based Countdown Timers**:
+  - **Easy**: 10 Minutes
+  - **Medium**: 25 Minutes
+  - **Hard**: 45 Minutes
+- **Multi-Language Monaco Editor**: Built-in starter templates for **JavaScript**, **Python**, **Java**, and **C++**.
+- **In-Browser Code Runner**: Instant local execution sandbox for JavaScript code solutions.
+- **Deep Gemini AI Evaluation**: Assesses source code for syntax, logic correctness, edge cases, time complexity ($O(N)$), space complexity ($O(1)$), bugs, and recommendations.
+- **Single Verdict Badges**: Clear evaluation results (`ACCEPTED ✅`, `INCORRECT / FAILED ❌`, `PARTIALLY CORRECT ⚠️`).
+- **AI Step-by-Step Explanation**: On-demand optimal algorithmic code solution and detailed walkthrough.
+
+### 🎭 2. Resume-Driven Behavioral Round
+- **Personalized Context**: Gemini parses candidate resumes to generate context-aware questions matched to their target role.
+- **STAR Framework Evaluation**: Evaluates answers across **Situation**, **Task**, **Action**, and **Result** with per-component numerical sub-scores.
+- **Feedback & Exemplar Walkthrough**: AI suggestions on how to quantify business impact.
+
+### 🧠 3. Quantitative Aptitude Round
+- **Configurable Sets**: Choose **10, 20, 30, or 50 questions**.
+- **Instant AI Explanations**: One-click detailed math solution breakdowns generated live by Gemini.
+- **Option Verification**: Multi-choice selection with zero answer-key leakage on the UI.
+
+### 📊 4. Unified Scoring & Performance Dossier
+- **Auto-Submit Integrity**: Automatically batch-posts un-submitted candidate solutions prior to final submission.
+- **Completion Modal**: Displays Attempted, Correct, Wrong, Accuracy %, Average Score, and "Review Solutions" navigation.
+- **Portfolio Readiness Score**: Weighted readiness score calculated on a normalized 10-point scale.
+- **Full AI Report Dossier**:
+  - Overall Readiness Gauge & Category Performance Metrics
+  - Diagnostic Strengths & Growth Areas
+  - STAR Communication Matrix
+  - 30-Day Interview Preparation Roadmap
+  - Categorized Recent Practice Session History
+
+---
+
+## 📦 Installation & Local Setup
 
 ### Prerequisites
-- Node.js (v18+)
-- Python (3.10+)
-- A Supabase project (free tier is fine)
-- An OpenAI API key
+- **Node.js**: `v18.0.0` or higher
+- **Python**: `v3.10` or higher
+- **Supabase Account**: Hosted Postgres Database & Auth
+- **Google Gemini API Key**: Free tier or paid plan key from Google AI Studio
 
-### 1. Clone the repo
+### 1. Clone the Repository
 ```bash
-git clone https://github.com/<your-org>/ai-interview-coach.git
+git clone https://github.com/kartik1280/ai-interview-coach.git
 cd ai-interview-coach
 ```
 
-### 2. Frontend
+### 2. Frontend Setup
 ```bash
 cd frontend
 npm install
-cp .env.example .env      # add your Supabase URL + anon key
+cp .env.example .env
 npm run dev
 ```
 
-### 3. Backend
+### 3. Backend Setup
 ```bash
 cd backend
 python -m venv venv
-source venv/bin/activate       # Windows: venv\Scripts\activate
+
+# On Windows:
+.\venv\Scripts\activate
+# On Linux/macOS:
+source venv/bin/activate
+
 pip install -r requirements.txt
-cp .env.example .env           # add your Supabase service key + OpenAI key
-uvicorn main:app --reload
+cp .env.example .env
+uvicorn app.main:app --reload --port 8000
 ```
 
-### 4. Environment variables
+---
 
-**`frontend/.env`**
-```
-VITE_SUPABASE_URL=
-VITE_SUPABASE_ANON_KEY=
+## 🔑 Environment Configuration
+
+### **`frontend/.env`**
+```env
+VITE_SUPABASE_URL=https://your-supabase-project.supabase.co
+VITE_SUPABASE_ANON_KEY=your-supabase-anon-key
 VITE_API_BASE_URL=http://localhost:8000
 ```
 
-**`backend/.env`**
+### **`backend/.env`**
+```env
+SUPABASE_URL=https://your-supabase-project.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=your-supabase-service-role-key
+GEMINI_API_KEY=your-google-gemini-api-key
 ```
-SUPABASE_URL=
-SUPABASE_SERVICE_ROLE_KEY=
-OPENAI_API_KEY=
-```
-
-⚠️ Never commit `.env` files — both are already listed in `.gitignore`.
 
 ---
 
-## Features
+## 🗄️ Database Schema
 
-- **Landing page** with a retro-terminal hero and a scroll-driven reveal
-- **Auth** — sign up / log in via a floppy-disk "insert to authenticate" interaction
-- **Create Interview** — one-time setup: name, target position, industry, resume upload (drag & drop, PDF/DOCX)
-- **Dashboard** — readiness score, rounds completed, daily practice streak, per-round-type scores with expandable AI feedback, recent history, and "Areas to Improve"
-- **Three practice round types:**
-  - **Technical** — 10 curated DSA-style questions per target position, filtered by industry, AI-graded
-  - **Behavioral** — AI-generated live questions based on the user's actual resume, AI-graded with a STAR breakdown
-  - **Aptitude** — 50 MCQ questions per industry, shuffled into random order each attempt, auto-graded against a fixed answer key
-- **Areas to Improve** — shows exactly one suggestion per round type the user has *completed*, never guessing at rounds they haven't attempted
-- **Full Report page** — overall readiness, a per-round-type score chart, best/worst-scored answers with feedback, STAR breakdown (if a Behavioral round exists), and expanded improvement notes
-- **Streak tracking** — counts consecutive days with at least one completed round
-
----
-
-## Technical Workflow
-
-**How a request actually flows through the app**, end to end:
-
-```
-User action in the browser (React)
-        ↓
-Frontend calls a FastAPI endpoint
-        ↓
-Backend reads/writes Supabase (Postgres) as needed
-        ↓
-For AI-dependent steps (Behavioral questions, scoring, feedback),
-backend calls the OpenAI API
-        ↓
-Backend returns a JSON response in an agreed shape
-        ↓
-Frontend updates the UI (React state / TanStack Query cache)
-```
-
-**Example — starting a Technical round:**
-1. User clicks "Start a practice round" → picks "Technical"
-2. Frontend calls `POST /round/start` with the user's id and round type
-3. Backend looks up the user's `target_position` and `industry` from their profile
-4. Backend pulls 10 matching rows from the static `technical_questions` table (no AI call needed here — it's a lookup, not a generation)
-5. Backend creates a new row in `rounds` and one row per question in `questions`
-6. Response returns the question list to the frontend, which renders the mock interview screen
-
-**Example — completing a Behavioral round:**
-1. Backend generates questions live via OpenAI, using the parsed resume + target position + industry as context
-2. Each answer the user submits is sent to OpenAI for scoring + feedback + a STAR breakdown
-3. Once all questions are answered, the round is marked `completed` with an overall score
-4. Dashboard stats (readiness, streak, recent history, areas to improve) are recalculated from the updated `rounds` table on next load — nothing is cached or precomputed
-
-**Build strategy:** backend endpoints are built first against **hardcoded fake data** matching the agreed response shape, so frontend work is never blocked waiting on real AI logic. Real OpenAI calls are wired in afterward without changing what the frontend receives.
-
----
-
-## Database Schema
-
-| Table | Purpose |
+| Table | Description |
 |---|---|
-| `users` | Account info |
-| `profiles` | Target position, industry, resume link — created on Create Interview submission |
-| `resumes` | Uploaded file, extracted text, AI-parsed skills |
-| `rounds` | One row per practice session (type, status, score) |
-| `questions` | Questions belonging to a specific round |
-| `answers` | User's answers, scores, and feedback |
-| `technical_questions` | Static bank of DSA questions per position/industry |
-| `aptitude_questions` | Static bank of MCQ questions per industry |
+| `users` | Candidate authentication credentials and account metadata |
+| `profiles` | Target position, industry, experience level, and resume URLs |
+| `resumes` | Uploaded resume files, extracted raw text, and parsed skills |
+| `rounds` | Individual practice session records (type, difficulty, status, score) |
+| `questions` | Questions linked to specific practice rounds |
+| `answers` | User submitted answers, source code, scores, feedback, and AI analyses |
+| `technical_questions` | Master bank of role and industry DSA problems |
+| `aptitude_questions` | Master bank of quantitative and logical multiple-choice questions |
 
 ---
 
-## API Endpoints
+## 🔌 Core API Endpoints
 
-| Endpoint | Purpose |
-|---|---|
-| `POST /auth/signup` | Create an account |
-| `POST /auth/login` | Log in, returns whether the user already has a profile (for routing) |
-| `POST /resume/upload` | Store resume, extract text, parse skills via AI |
-| `DELETE /resume/{id}` | Remove an uploaded resume |
-| `POST /interview/create` | Save the Create Interview form |
-| `GET /dashboard` | Return everything the dashboard needs in one call |
-| `POST /round/start` | Start a round (bank lookup or live AI generation, depending on type) |
-| `POST /round/{id}/answer` | Submit an answer, get back a score and feedback |
-| `GET /report/latest` | Powers the Full Report page |
-
----
-
-## Project Status
-
-✅ Landing page, Auth screens, Create Interview, Dashboard — designed and prototyped
-✅ Database schema and endpoint contracts — finalized
-🚧 Backend implementation — in progress (fake-data endpoints first, then real AI wiring)
-🚧 Mock Interview screen — not yet designed
-🚧 Full Report page — in progress
-⬜ Question content — 60 Technical questions + Aptitude bank still need to be written
-⬜ Settings page — not started
+| Endpoint | Method | Description |
+|---|:---:|---|
+| `/auth/signup` | `POST` | Register a new candidate account |
+| `/auth/login` | `POST` | Authenticate user and return profile status |
+| `/resume/upload` | `POST` | Upload PDF resume, extract text, and parse background via Gemini |
+| `/interview/create` | `POST` | Create or update candidate interview configuration profile |
+| `/dashboard` | `GET` | Retrieve readiness score, practice streak, and recent history |
+| `/round/start` | `POST` | Initialize practice round (Technical, Behavioral, or Aptitude) |
+| `/round/{id}/answer` | `POST` | Submit solution, evaluate via Gemini AI, and save score |
+| `/round/{id}/finish` | `POST` | Finalize round session and compute summary stats |
+| `/report/latest` | `GET` | Fetch comprehensive Executive AI Performance Report |
 
 ---
 
-## Contributing
+## 🧪 Automated Verification & Test Suites
 
-This is a hackathon project built by a Team Delmora.
+The codebase includes exhaustive automated test suites in the `backend/` directory:
+
+```bash
+cd backend
+
+# Run Analytics Integrity & Gemini Fallback Suite
+.\venv\Scripts\python.exe analytics_integrity_test.py
+
+# Run Full End-to-End System Audit Suite
+.\venv\Scripts\python.exe full_final_audit_test.py
+
+# Run Question Count & Scoring Verification Suite
+.\venv\Scripts\python.exe question_count_scoring_suite.py
+```
+
+---
+
+## 📌 Status
+
+- ✅ **Authentication & Authorization**: Supabase Auth + JWT Verification
+- ✅ **Resume Parsing & Setup**: PDF Parsing + Role Target Configuration
+- ✅ **Technical Practice Round**: Multi-language Monaco Editor + Gemini Evaluation + In-browser JS execution
+- ✅ **Behavioral Practice Round**: STAR Framework Breakdown + Live Resume Question Generation
+- ✅ **Aptitude Practice Round**: MCQ Drills + Live AI Explanations
+- ✅ **Dashboard & Executive Dossier**: Readiness Score + Recent History Filters + 30-Day Roadmap
+- ✅ **Test Coverage & Verification**: 100% Passing Automated Test Suites
+
+---
+
+## 🤝 Contributing
+
+This is a hackathon project built by Team Delmora.
